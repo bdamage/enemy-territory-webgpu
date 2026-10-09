@@ -242,6 +242,18 @@ void Sys_PumpEvents( void );
 
 #endif
 
+//======================= EMSCRIPTEN (WEB) DEFINES =====================
+
+#ifdef __EMSCRIPTEN__
+
+#define MAC_STATIC
+
+#define CPUSTRING   "web-wasm32"
+
+#define PATH_SEP '/'
+
+#endif
+
 //======================= LINUX DEFINES =================================
 
 // the mac compiler can't handle >32k of locals, so we

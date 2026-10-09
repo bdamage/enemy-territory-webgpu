@@ -365,7 +365,7 @@ The module is making a system call
 ====================
 */
 //rcg010207 - see my comments in VM_DllSyscall(), in qcommon/vm.c ...
-#if ( ( defined __linux__ ) && ( defined __powerpc__ ) ) || ( defined MACOS_X )
+#if ( ( defined __linux__ ) && ( defined __powerpc__ ) ) || ( defined MACOS_X ) || defined( __EMSCRIPTEN__ )
 #define VMA( x ) ( (void *) args[x] )
 #else
 #define VMA( x ) VM_ArgPtr( args[x] )

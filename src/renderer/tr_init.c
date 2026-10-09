@@ -205,6 +205,7 @@ vec2hack_t tess_texCoords1[SHADER_MAX_VERTEXES];
 glIndex_t tess_indexes[SHADER_MAX_INDEXES];
 color4ubhack_t tess_vertexColors[SHADER_MAX_VERTEXES];
 
+#ifndef __EMSCRIPTEN__ // WebGPU port: these are real functions in web/wgl_*.c
 void ( APIENTRY * qglMultiTexCoord2fARB )( GLenum texture, GLfloat s, GLfloat t );
 void ( APIENTRY * qglActiveTextureARB )( GLenum texture );
 void ( APIENTRY * qglClientActiveTextureARB )( GLenum texture );
@@ -215,6 +216,7 @@ void ( APIENTRY * qglUnlockArraysEXT )( void );
 //----(SA)	added
 void ( APIENTRY * qglPNTrianglesiATI )( GLenum pname, GLint param );
 void ( APIENTRY * qglPNTrianglesfATI )( GLenum pname, GLfloat param );
+#endif
 /*
 The tessellation level and normal generation mode are specified with:
 

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enemy Territory · WebGPU</title>
+<style>
+  :root {
+    --bg: #0b0d0c;
+    --panel: rgba(16, 19, 17, 0.92);
+    --text: #e8e4d8;
+    --muted: #9a9686;
+    --accent: #c9a54a;
+    --danger: #e0664f;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  #canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(20,24,20,0.55), rgba(5,6,5,0.9)); }
+  #overlay.hidden { display: none; }
+  .card { width: min(440px, calc(100vw - 32px)); padding: 28px; background: var(--panel);
+    border: 1px solid #2a2f2a; border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+  .bar { height: 6px; background: #222722; border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
+  #status { margin-top: 10px; color: var(--muted); font-size: 13px; min-height: 1.4em; }
+  #status.error { color: var(--danger); white-space: pre-wrap; }
+  button { margin-top: 18px; width: 100%; padding: 11px; font: inherit; font-weight: 600;
+    color: #14120b; background: var(--accent); border: 0; border-radius: 4px; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  button[hidden] { display: none; }
+  .hint { margin-top: 14px; color: var(--muted); font-size: 12px; }
+  kbd { padding: 1px 5px; border: 1px solid #3a3f3a; border-radius: 3px; font-size: 11px; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1"></canvas>
+<div id="overlay">
+  <div class="card">
+    <h1>Enemy Territory</h1>
+    <p class="sub">Wolfenstein: Enemy Territory 2.60b, running on WebAssembly and WebGPU</p>
+    <div class="bar"><div id="progress"></div></div>
+    <div id="status">Starting…</div>
+    <button id="play" hidden>Click to play</button>
+    <div class="hint">Click captures the mouse. <kbd>Esc</kbd> releases it and opens the menu. <kbd>`</kbd> opens the console.</div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  var DATA_FILES = ['etmain/pak0.pk3', 'etmain/pak1.pk3', 'etmain/pak2.pk3'];
+  var CACHE_NAME = 'et-data-v1';
+
+  var overlay = document.getElementById('overlay');
+  var statusEl = document.getElementById('status');
+  var progressEl = document.getElementById('progress');
+  var playBtn = document.getElementById('play');
+  var canvas = document.getElementById('canvas');
+  var started = false;
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.className = isError ? 'error' : '';
+  }
+
+  function fail(text) {
+    setStatus(text, true);
+    playBtn.hidden = true;
+    overlay.classList.remove('hidden');
+  }
+
+  function mb(n) { return (n / 1048576).toFixed(1) + ' MB'; }
+
+  async function fetchWithProgress(url, onProgress) {
+    var cache = null;
+    try { cache = await caches.open(CACHE_NAME); } catch (e) { /* no Cache API (e.g. insecure context) */ }
+    var response = cache ? await cache.match(url) : null;
+    var fromCache = !!response;
+    if (!response) {
+      response = await fetch(url);
+      if (!response.ok) throw new Error(url + ': HTTP ' + response.status);
+    }
+    var total = +response.headers.get('Content-Length') || 0;
+    var reader = (fromCache ? response : response.clone()).body.getReader();
+    var chunks = [], received = 0;
+    for (;;) {
+      var r = await reader.read();
+      if (r.done) break;
+      chunks.push(r.value);
+      received += r.value.length;
+      onProgress(received, total);
+    }
+    if (cache && !fromCache) {
+      try { await cache.put(url, response); } catch (e) { console.warn('cache put failed', e); }
+    }
+    var out = new Uint8Array(received), off = 0;
+    for (var i = 0; i < chunks.length; i++) { out.set(chunks[i], off); off += chunks[i].length; }
+    return out;
+  }
+
+  async function initWebGPU() {
+    if (!navigator.gpu) throw new Error('WebGPU is not available in this browser.\nUse a recent Chrome, Edge, Safari 26+ or Firefox with WebGPU enabled.');
+    var adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) throw new Error('No suitable GPU adapter found.');
+    var device = await adapter.requestDevice();
+    var errors = 0;
+    device.addEventListener('uncapturederror', function (e) {
+      if (errors++ < 20) console.error('WebGPU error:', e.error.message);
+    });
+    device.lost.then(function (info) {
+      if (window.Module && Module._WGL_DeviceLost) Module._WGL_DeviceLost();
+      fail('GPU device lost: ' + info.message);
+    });
+    return device;
+  }
+
+  function engineArgs() {
+    var args = ['+set', 'com_hunkmegs', '128', '+set', 'com_zonemegs', '24'];
+    var q = new URLSearchParams(location.search).get('args');
+    if (q) args = args.concat(q.trim().split(/\s+/));
+    return args;
+  }
+
+  async function boot() {
+    var device;
+    try {
+      setStatus('Initialising WebGPU…');
+      device = await initWebGPU();
+    } catch (e) {
+      return fail(e.message);
+    }
+
+    var files = {};
+    try {
+      for (var i = 0; i < DATA_FILES.length; i++) {
+        var name = DATA_FILES[i];
+        files[name] = await fetchWithProgress('data/' + name, function (got, total) {
+          setStatus('Loading ' + name + ' · ' + mb(got) + (total ? ' / ' + mb(total) : ''));
+          progressEl.style.width = (total ? Math.min(100, (got / total) * 100) : 50) + '%';
+        });
+      }
+    } catch (e) {
+      return fail('Could not load game data: ' + e.message + '\nRun tools/fetch_data.sh, then make serve.');
+    }
+
+    setStatus('Starting engine…');
+    progressEl.style.width = '100%';
+
+    window.Module = {
+      canvas: canvas,
+      preinitializedWebGPUDevice: device,
+      etFiles: files,
+      arguments: engineArgs(),
+      print: function (s) { console.log(s); },
+      printErr: function (s) { console.warn(s); },
+      onRuntimeInitialized: function () {
+        started = true;
+        setStatus('Ready.');
+        playBtn.hidden = false;
+      },
+      onFatalError: function (msg) { fail(msg); },
+      onPointerLock: function (locked) {
+        if (locked) overlay.classList.add('hidden');
+      },
+      onAbort: function (what) { fail('Engine aborted: ' + what); }
+    };
+    canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+    var s = document.createElement('script');
+    s.src = 'et.js';
+    s.onerror = function () { fail('Failed to load et.js'); };
+    document.body.appendChild(s);
+  }
+
+  playBtn.addEventListener('click', function () {
+    if (!started) return;
+    overlay.classList.add('hidden');
+    canvas.requestPointerLock();
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

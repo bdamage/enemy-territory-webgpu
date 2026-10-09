@@ -1186,7 +1186,7 @@ void Sys_OpenURL( const char *url, qboolean doexit );                       // N
 int Sys_GetHighQualityCPU();
 float Sys_GetCPUSpeed( void );
 
-#ifdef __linux__
+#if defined( __linux__ ) || defined( __EMSCRIPTEN__ )
 // TTimo only on linux .. maybe on Mac too?
 // will OR with the existing mode (chmod ..+..)
 void Sys_Chmod( char *file, int mode );
@@ -1266,7 +1266,7 @@ void Com_GetHunkInfo( int* hunkused, int* hunkexpected );
 #define SYS_DLLNAME_UI_SHIFT 5
 #define SYS_DLLNAME_UI "zndrud}=;3iqq"
 
-#elif defined( __linux__ )
+#elif defined( __linux__ ) || defined( __EMSCRIPTEN__ )
 
 // qagame.mp.i386.so
 #define SYS_DLLNAME_QAGAME_SHIFT 6

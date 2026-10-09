@@ -69,6 +69,11 @@ If you have questions concerning this license or the applicable additional terms
 #undef GL_ARB_multitexture
 #include "glext.h"
 
+#elif defined( __EMSCRIPTEN__ )
+
+// WebGPU port: GL types/enums only, calls are routed to web/wgl_*.c
+#include <GL/gl.h>
+
 #elif defined( __FreeBSD__ ) // rb010123
 
 #include <GL/gl.h>
@@ -212,7 +217,11 @@ extern void ( APIENTRY * qglPNTrianglesfATI )( GLenum pname, GLfloat param );
 //===========================================================================
 
 // non-windows systems will just redefine qgl* to gl*
-#if !defined( _WIN32 ) && !defined( MACOS_X ) && !defined( __linux__ ) && !defined( __FreeBSD__ ) // rb010123
+#if defined( __EMSCRIPTEN__ )
+
+#include "../../web/qgl_wgpu.h"
+
+#elif !defined( _WIN32 ) && !defined( MACOS_X ) && !defined( __linux__ ) && !defined( __FreeBSD__ ) // rb010123
 
 #include "qgl_linked.h"
 
