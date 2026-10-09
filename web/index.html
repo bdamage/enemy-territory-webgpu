@@ -41,7 +41,7 @@
 <div id="overlay">
   <div class="card">
     <h1>Enemy Territory</h1>
-    <p class="sub">Wolfenstein: Enemy Territory 2.60b, running on WebAssembly and WebGPU</p>
+    <p class="sub" id="subtitle">Wolfenstein: Enemy Territory 2.60b, running on WebAssembly and WebGPU</p>
     <div class="bar"><div id="progress"></div></div>
     <div id="status">Starting…</div>
     <button id="play" hidden>Click to play</button>
@@ -52,9 +52,21 @@
 (function () {
   'use strict';
 
-  var DATA_FILES = ['etmain/pak0.pk3', 'etmain/pak1.pk3', 'etmain/pak2.pk3', 'etmain/mp_bin.pk3'];
+  // Per-build settings; the ET: Legacy page (etl/Makefile) overrides them.
+  var CONFIG = window.ET_CONFIG || {
+    script: 'et.js',
+    dataBase: 'data/',
+    files: ['etmain/pak0.pk3', 'etmain/pak1.pk3', 'etmain/pak2.pk3', 'etmain/mp_bin.pk3'],
+    home: '/home/et',
+    args: ['+set', 'com_hunkmegs', '128', '+set', 'com_zonemegs', '24']
+  };
+  var DATA_FILES = CONFIG.files;
   var CACHE_NAME = 'et-data-v1';
 
+  if (CONFIG.subtitle) {
+    document.getElementById('subtitle').textContent = CONFIG.subtitle;
+    document.title = CONFIG.title;
+  }
   var overlay = document.getElementById('overlay');
   var statusEl = document.getElementById('status');
   var progressEl = document.getElementById('progress');
@@ -128,7 +140,7 @@
   }
 
   function engineArgs() {
-    var args = ['+set', 'com_hunkmegs', '128', '+set', 'com_zonemegs', '24'];
+    var args = CONFIG.args.slice();
     var q = new URLSearchParams(location.search).get('args');
     if (q) args = args.concat(q.trim().split(/\s+/));
     return args;
@@ -147,7 +159,7 @@
     try {
       for (var i = 0; i < DATA_FILES.length; i++) {
         var name = DATA_FILES[i];
-        files[name] = await fetchWithProgress('data/' + name, function (got, total) {
+        files[name] = await fetchWithProgress(CONFIG.dataBase + name, function (got, total) {
           setStatus('Loading ' + name + ' · ' + mb(got) + (total ? ' / ' + mb(total) : ''));
           progressEl.style.width = (total ? Math.min(100, (got / total) * 100) : 50) + '%';
         });
@@ -163,6 +175,7 @@
       canvas: canvas,
       preinitializedWebGPUDevice: device,
       etFiles: files,
+      etHome: CONFIG.home,
       arguments: engineArgs(),
       etRelay: relayURL(),
       print: function (s) { console.log(s); },
@@ -181,8 +194,8 @@
     canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
     var s = document.createElement('script');
-    s.src = 'et.js';
-    s.onerror = function () { fail('Failed to load et.js'); };
+    s.src = CONFIG.script;
+    s.onerror = function () { fail('Failed to load ' + CONFIG.script); };
     document.body.appendChild(s);
   }
 

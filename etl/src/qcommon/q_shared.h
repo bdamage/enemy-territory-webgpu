@@ -281,6 +281,16 @@ static ID_INLINE float idSqrt(float x)
 
 #endif // defined(__APPLE__)
 
+//======================= EMSCRIPTEN (WEB) DEFINES ======================
+
+#ifdef __EMSCRIPTEN__
+
+#define CPUSTRING   "web-wasm32"
+
+#define PATH_SEP '/'
+
+#endif
+
 //======================= LINUX DEFINES =================================
 
 // the mac compiler can't handle >32k of locals, so we

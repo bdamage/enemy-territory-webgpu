@@ -3616,6 +3616,15 @@ void Com_Frame(void)
 		minUsec = 1000;
 	}
 
+#ifdef __EMSCRIPTEN__
+	// web: frames are paced by requestAnimationFrame (see etl/web/etl_sys.c);
+	// nothing can block here, so just pump the network once
+	if (com_sv_running->integer)
+	{
+		SV_SendQueuedPackets();
+	}
+	NET_Sleep(0);
+#else
 	do
 	{
 		if (com_sv_running->integer)
@@ -3643,6 +3652,7 @@ void Com_Frame(void)
 		}
 	}
 	while (Com_TimeVal(minUsec));
+#endif
 
 #ifndef DEDICATED
 	IN_Frame();

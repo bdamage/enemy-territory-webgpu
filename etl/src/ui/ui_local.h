@@ -671,7 +671,13 @@ void trap_Cmd_ExecuteText(int exec_when, const char *text);      // don't use EX
 void trap_AddCommand(const char *cmdName);
 int trap_FS_FOpenFile(const char *qpath, fileHandle_t *f, fsMode_t mode);
 void trap_FS_Read(void *buffer, int len, fileHandle_t f);
+#ifdef CGAMEDLL
+// the shared ui code is also compiled into cgame, whose trap returns int; a
+// mismatched prototype is a call-signature trap on WebAssembly
+int trap_FS_Write(const void *buffer, int len, fileHandle_t f);
+#else
 void trap_FS_Write(const void *buffer, int len, fileHandle_t f);
+#endif
 void trap_FS_FCloseFile(fileHandle_t f);
 int trap_FS_GetFileList(const char *path, const char *extension, char *listbuf, int bufsize);
 int trap_FS_Delete(const char *filename);

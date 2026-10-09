@@ -3,9 +3,10 @@
 // index.html downloaded (Module.etFiles: { 'etmain/pak0.pk3': Uint8Array }).
 Module['preRun'] = Module['preRun'] || [];
 Module['preRun'].push(function () {
+  var home = Module['etHome'] || '/home/et';
   FS.mkdirTree('/et/etmain');
-  FS.mkdirTree('/home/et');
-  FS.mount(IDBFS, {}, '/home/et');
+  FS.mkdirTree(home);
+  FS.mount(IDBFS, {}, home);
 
   addRunDependency('et-idbfs');
   FS.syncfs(true, function (err) {

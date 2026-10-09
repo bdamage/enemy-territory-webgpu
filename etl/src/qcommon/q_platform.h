@@ -181,6 +181,19 @@
 
 #endif
 
+//=============================================================== EMSCRIPTEN ===
+
+#ifdef __EMSCRIPTEN__
+
+#define OS_STRING "web"
+#define ARCH_STRING "wasm32"
+#define ID_INLINE inline
+#define PATH_SEP '/'
+#define Q3_LITTLE_ENDIAN
+#define DLL_EXT ".wasm"
+
+#endif
+
 //================================================================= LINUX ===
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__)

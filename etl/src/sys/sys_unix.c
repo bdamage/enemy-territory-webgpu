@@ -40,8 +40,13 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "sys_local.h"
+#ifdef __EMSCRIPTEN__
+#include "web_js.h"
+#endif
 
+#ifndef __EMSCRIPTEN__
 #include <execinfo.h>
+#endif
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -955,6 +960,16 @@ static void Sys_XmessageCommand(dialogType_t type, const char *message, const ch
  * @param[in] message Message to show
  * @param[in] title   Message box title
  */
+#ifdef __EMSCRIPTEN__
+
+dialogResult_t Sys_Dialog(dialogType_t type, const char *message, const char *title)
+{
+	// no native dialogs in a browser tab; errors are shown by the page
+	return DR_OK;
+}
+
+#else
+
 dialogResult_t Sys_Dialog(dialogType_t type, const char *message, const char *title)
 {
 	typedef enum
@@ -1052,6 +1067,7 @@ dialogResult_t Sys_Dialog(dialogType_t type, const char *message, const char *ti
 	return DR_OK;
 }
 #endif
+#endif
 
 /**
  * @brief Actually forks and starts a process
@@ -1112,6 +1128,15 @@ void Sys_DoStartProcess(char *cmdline)
  * If !doexit then start the process ASAP, otherwise push it for execution at exit
  * (i.e. let complete shutdown of the game and freeing of resources happen)
  */
+#ifdef __EMSCRIPTEN__
+
+void Sys_StartProcess(char *cmdline, qboolean doexit)
+{
+	Com_Printf("Sys_StartProcess not available in the browser: %s\n", cmdline);
+}
+
+#else
+
 void Sys_StartProcess(char *cmdline, qboolean doexit)
 {
 	if (doexit)
@@ -1125,12 +1150,22 @@ void Sys_StartProcess(char *cmdline, qboolean doexit)
 	Com_DPrintf("Sys_StartProcess %s\n", cmdline);
 	Sys_DoStartProcess(cmdline);
 }
+#endif
 
 /**
  * @brief Open URL in system browser
  * @param[in] url    URL to open
  * @param     doexit Quit from game after opening URL
  */
+#ifdef __EMSCRIPTEN__
+
+void Sys_OpenURL(const char *url, qboolean doexit)
+{
+	Sys_JS_OpenURL(url);
+}
+
+#else
+
 void Sys_OpenURL(const char *url, qboolean doexit)
 {
 #ifndef DEDICATED
@@ -1155,6 +1190,7 @@ void Sys_OpenURL(const char *url, qboolean doexit)
 	Sys_StartProcess(cmdline, doexit);
 #endif // not DEDICATED
 }
+#endif
 
 /**
  * @brief Unix specific "safe" GL implementation initialisation
@@ -1279,15 +1315,17 @@ void Sys_Backtrace(int sig)
 	size_t size;
 
 	// Get the backtrace and write it to stderr
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 	size = backtrace(syms, 32);
+#else
+	size = 0;
 #endif
 	fprintf(stderr, "--- Report this to the project - START ---\n");
 	fprintf(stderr, "ERROR: Caught SIGSEGV(%d)\n", sig);
 	fprintf(stderr, "VERSION: %s (%s)\n", ETLEGACY_VERSION, ETLEGACY_VERSION_SHORT);
 	fprintf(stderr, "BTIME: %s\n", PRODUCT_BUILD_TIME);
 	fprintf(stderr, "BACKTRACE:\n");
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 	backtrace_symbols_fd(syms, size, STDERR_FILENO);
 #endif
 	fprintf(stderr, "--- Report this to the project -  END  ---\n");
