@@ -16,6 +16,7 @@
 #include "web_local.h"
 
 static int mouseDx, mouseDy;
+static double wheelAccum;
 static qboolean pointerLocked;
 static qboolean inputInitialized;
 
@@ -102,8 +103,12 @@ static EM_BOOL OnKey( int type, const EmscriptenKeyboardEvent *e, void *user ) {
 	int key = MapKey( e );
 	qboolean down = ( type == EMSCRIPTEN_EVENT_KEYDOWN );
 
-	// leave browser shortcuts like cmd-R / ctrl-shift-I alone
-	if ( e->metaKey ) {
+	// leave browser shortcuts alone: cmd-*, reload, fullscreen, devtools
+	if ( e->metaKey || !strcmp( e->code, "F5" ) || !strcmp( e->code, "F11" ) || !strcmp( e->code, "F12" ) ) {
+		return EM_FALSE;
+	}
+	// alt-enter toggles fullscreen in the page (see index.html)
+	if ( e->altKey && !strcmp( e->code, "Enter" ) ) {
 		return EM_FALSE;
 	}
 
@@ -127,6 +132,23 @@ static EM_BOOL OnMouseMove( int type, const EmscriptenMouseEvent *e, void *user 
 	return EM_FALSE;
 }
 
+// Pointer lock with raw (unaccelerated) motion where supported. Must run
+// inside the mousedown handler to have user activation.
+EM_JS( void, IN_JS_RequestPointerLock, ( void ), {
+	var canvas = Module['canvas'];
+	var p;
+	try {
+		p = canvas.requestPointerLock( { unadjustedMovement: true } );
+	} catch ( e ) {
+		p = null;
+	}
+	if ( p && p.catch ) {
+		p.catch( function() { canvas.requestPointerLock(); } );
+	} else if ( !p && document.pointerLockElement !== canvas ) {
+		canvas.requestPointerLock();
+	}
+} );
+
 static int MouseButtonKey( int button ) {
 	switch ( button ) {
 	case 0: return K_MOUSE1;
@@ -142,11 +164,12 @@ static EM_BOOL OnMouseButton( int type, const EmscriptenMouseEvent *e, void *use
 	int key = MouseButtonKey( e->button );
 
 	if ( !pointerLocked ) {
-		// the first click only captures the mouse
+		// the first click on the canvas only captures the mouse
 		if ( type == EMSCRIPTEN_EVENT_MOUSEDOWN ) {
-			emscripten_request_pointerlock( "#canvas", 1 );
+			IN_JS_RequestPointerLock();
+			return EM_TRUE;
 		}
-		return EM_TRUE;
+		return EM_FALSE;
 	}
 	if ( key ) {
 		Sys_QueEvent( 0, SE_KEY, key, type == EMSCRIPTEN_EVENT_MOUSEDOWN, 0, NULL );
@@ -154,15 +177,24 @@ static EM_BOOL OnMouseButton( int type, const EmscriptenMouseEvent *e, void *use
 	return EM_TRUE;
 }
 
+// Wheels report ~100 px per notch, trackpads a stream of small deltas;
+// accumulate into discrete wheel "clicks".
 static EM_BOOL OnWheel( int type, const EmscriptenWheelEvent *e, void *user ) {
+	double dy = e->deltaY;
 	int key;
 
-	if ( e->deltaY == 0.0 ) {
-		return EM_TRUE;
+	if ( e->deltaMode == DOM_DELTA_LINE ) {
+		dy *= 33.0;
+	} else if ( e->deltaMode == DOM_DELTA_PAGE ) {
+		dy *= 100.0;
 	}
-	key = e->deltaY < 0 ? K_MWHEELUP : K_MWHEELDOWN;
-	Sys_QueEvent( 0, SE_KEY, key, qtrue, 0, NULL );
-	Sys_QueEvent( 0, SE_KEY, key, qfalse, 0, NULL );
+	wheelAccum += dy;
+	while ( wheelAccum <= -50.0 || wheelAccum >= 50.0 ) {
+		key = wheelAccum < 0 ? K_MWHEELUP : K_MWHEELDOWN;
+		Sys_QueEvent( 0, SE_KEY, key, qtrue, 0, NULL );
+		Sys_QueEvent( 0, SE_KEY, key, qfalse, 0, NULL );
+		wheelAccum += wheelAccum < 0 ? 50.0 : -50.0;
+	}
 	return EM_TRUE;
 }
 

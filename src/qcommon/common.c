@@ -2722,7 +2722,13 @@ void Com_Init( char *commandLine ) {
 
 	// bani: init this early
 	Com_StartupVariable( "com_ignorecrash" );
+#ifdef __EMSCRIPTEN__
+	// web: closing the tab never shuts down cleanly, so the profile.pid
+	// crash check would revert settings on every visit
+	com_ignorecrash = Cvar_Get( "com_ignorecrash", "1", 0 );
+#else
 	com_ignorecrash = Cvar_Get( "com_ignorecrash", "0", 0 );
+#endif
 
 	// ydnar: init crashed variable as early as possible
 	com_crashed = Cvar_Get( "com_crashed", "0", CVAR_TEMP );

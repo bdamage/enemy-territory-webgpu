@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Enemy Territory · WebGPU</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     --bg: #0b0d0c;
@@ -15,7 +16,7 @@
   }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
-  #canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
+  #canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; object-fit: contain; background: #000; }
   #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: radial-gradient(ellipse at center, rgba(20,24,20,0.55), rgba(5,6,5,0.9)); }
   #overlay.hidden { display: none; }
@@ -44,7 +45,7 @@
     <div class="bar"><div id="progress"></div></div>
     <div id="status">Starting…</div>
     <button id="play" hidden>Click to play</button>
-    <div class="hint">Click captures the mouse. <kbd>Esc</kbd> releases it and opens the menu. <kbd>`</kbd> opens the console.</div>
+    <div class="hint">Click captures the mouse. <kbd>Esc</kbd> releases it and opens the menu. <kbd>`</kbd> opens the console. <kbd>Alt</kbd>+<kbd>Enter</kbd> toggles fullscreen.</div>
   </div>
 </div>
 <script>
@@ -175,10 +176,43 @@
     document.body.appendChild(s);
   }
 
+  // The renderer's resolution is fixed at vid_restart time; follow window
+  // size changes (including fullscreen) with a debounced vid_restart.
+  var resizeTimer = 0;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (!started) return;
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+      if (Math.abs(w - canvas.width) > 8 || Math.abs(h - canvas.height) > 8) {
+        Module.ccall('WEB_ConsoleCommand', null, ['string'], ['vid_restart']);
+      }
+    }, 700);
+  });
+
+  // Alt+Enter: fullscreen with keyboard lock, so Esc reaches the game
+  // instead of releasing the mouse.
+  document.addEventListener('keydown', function (e) {
+    if (!(e.altKey && e.code === 'Enter')) return;
+    e.preventDefault();
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.documentElement.requestFullscreen().then(function () {
+        if (navigator.keyboard && navigator.keyboard.lock) navigator.keyboard.lock(['Escape']).catch(function () {});
+        canvas.requestPointerLock();
+      }).catch(function () {});
+    }
+  }, true);
+
   playBtn.addEventListener('click', function () {
     if (!started) return;
     overlay.classList.add('hidden');
-    canvas.requestPointerLock();
+    var p = null;
+    try { p = canvas.requestPointerLock({ unadjustedMovement: true }); } catch (e) { /* older API */ }
+    if (p && p.catch) p.catch(function () { canvas.requestPointerLock(); });
+    else if (!p) canvas.requestPointerLock();
   });
 
   boot();
