@@ -14,6 +14,7 @@
 #include "../src/client/client.h"
 #include "../src/ui/keycodes.h"
 #include "web_local.h"
+#include "web_js.h"
 
 static int mouseDx, mouseDy;
 static double wheelAccum;
@@ -132,22 +133,6 @@ static EM_BOOL OnMouseMove( int type, const EmscriptenMouseEvent *e, void *user 
 	return EM_FALSE;
 }
 
-// Pointer lock with raw (unaccelerated) motion where supported. Must run
-// inside the mousedown handler to have user activation.
-EM_JS( void, IN_JS_RequestPointerLock, ( void ), {
-	var canvas = Module['canvas'];
-	var p;
-	try {
-		p = canvas.requestPointerLock( { unadjustedMovement: true } );
-	} catch ( e ) {
-		p = null;
-	}
-	if ( p && p.catch ) {
-		p.catch( function() { canvas.requestPointerLock(); } );
-	} else if ( !p && document.pointerLockElement !== canvas ) {
-		canvas.requestPointerLock();
-	}
-} );
 
 static int MouseButtonKey( int button ) {
 	switch ( button ) {

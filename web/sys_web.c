@@ -20,6 +20,7 @@
 #include "../src/qcommon/qcommon.h"
 #include "../src/client/client.h"
 #include "web_local.h"
+#include "web_js.h"
 
 #define WEB_BASEPATH    "/et"
 #define WEB_HOMEPATH    "/home/et"
@@ -236,27 +237,9 @@ char *Sys_DefaultHomePath( void ) {
 	return WEB_HOMEPATH;
 }
 
-// Persist fs_homepath (configs, profiles) to IndexedDB.
-EM_JS( void, Sys_JS_SyncFS, ( void ), {
-	if ( Module['syncingFS'] ) {
-		Module['syncAgain'] = true;
-		return;
-	}
-	Module['syncingFS'] = true;
-	FS.syncfs( false, function( err ) {
-		Module['syncingFS'] = false;
-		if ( err ) {
-			console.warn( 'IDBFS sync failed', err );
-		}
-		if ( Module['syncAgain'] ) {
-			Module['syncAgain'] = false;
-			_Sys_SyncFS();
-		}
-	} );
-} );
 
-EMSCRIPTEN_KEEPALIVE void Sys_SyncFS( void ) {
-	Sys_JS_SyncFS();
+void Sys_SyncFS( void ) {
+	WEB_SyncFS();
 }
 
 // ---------------------------------------------------------------------------
@@ -345,22 +328,11 @@ void Sys_StartProcess( char *cmdline, qboolean doexit ) {
 	Com_Printf( "Sys_StartProcess not supported: %s\n", cmdline );
 }
 
-EM_JS( void, Sys_JS_OpenURL, ( const char *url ), {
-	window.open( UTF8ToString( url ), '_blank', 'noopener' );
-} );
 
 void Sys_OpenURL( const char *url, qboolean doexit ) {
 	Sys_JS_OpenURL( url );
 }
 
-EM_JS( void, Sys_JS_Print, ( const char *msg ), {
-	var s = UTF8ToString( msg );
-	if ( Module['print'] ) {
-		Module['print']( s );
-	} else {
-		console.log( s );
-	}
-} );
 
 // Line-buffered: the engine prints partial lines, the browser console doesn't.
 void Sys_Print( const char *msg ) {
@@ -383,13 +355,6 @@ void Sys_Print( const char *msg ) {
 	}
 }
 
-EM_JS( void, Sys_JS_Fatal, ( const char *msg ), {
-	var s = UTF8ToString( msg );
-	console.error( s );
-	if ( Module['onFatalError'] ) {
-		Module['onFatalError']( s );
-	}
-} );
 
 void Sys_Exit( int ex ) {
 	emscripten_cancel_main_loop();

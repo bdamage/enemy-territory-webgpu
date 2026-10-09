@@ -14,85 +14,14 @@
 #include "../src/game/q_shared.h"
 #include "../src/qcommon/qcommon.h"
 #include "../src/qcommon/dl_public.h"
+#include "web_js.h"
 
 static char dlLocalName[MAX_OSPATH];
 static qboolean dlActive;
 
-// state: 0 running, 1 done, 2 failed
-EM_JS( int, DL_JS_Begin, ( const char *url ), {
-	var relay = Module['etRelay'];
-	var target = UTF8ToString( url );
-	if ( !relay || typeof fetch === 'undefined' ) {
-		return 0;
-	}
-	// ws(s)://host/relay -> http(s)://host/dl (no regex literals: EM_JS goes
-	// through the C preprocessor, which mangles backslashes)
-	var base = relay.indexOf( 'ws' ) === 0 ? 'http' + relay.substring( 2 ) : relay;
-	if ( base.substring( base.length - 6 ) === '/relay' ) {
-		base = base.substring( 0, base.length - 6 );
-	}
-	var proxy = base + '/dl?url=' + encodeURIComponent( target );
-	var dl = Module['etDownload'] = { state: 0, received: 0, total: 0, data: null };
-	fetch( proxy ).then( function( res ) {
-		if ( !res.ok ) {
-			throw new Error( 'HTTP ' + res.status );
-		}
-		dl.total = +res.headers.get( 'Content-Length' ) || 0;
-		var reader = res.body.getReader();
-		var chunks = [];
-		function pump() {
-			return reader.read().then( function( r ) {
-				if ( r.done ) {
-					var out = new Uint8Array( dl.received ), off = 0;
-					for ( var i = 0; i < chunks.length; i++ ) {
-						out.set( chunks[i], off );
-						off += chunks[i].length;
-					}
-					dl.data = out;
-					dl.state = 1;
-					return;
-				}
-				chunks.push( r.value );
-				dl.received += r.value.length;
-				return pump();
-			} );
-		}
-		return pump();
-	} ).catch( function( e ) {
-		console.warn( 'download failed: ' + target + ': ' + e.message );
-		dl.state = 2;
-	} );
-	return 1;
-} );
 
-EM_JS( int, DL_JS_Poll, ( int *received ), {
-	var dl = Module['etDownload'];
-	if ( !dl ) {
-		return 2;
-	}
-	HEAP32[received >> 2] = dl.received;
-	return dl.state;
-} );
 
-// Writes the finished download to path; returns 1 on success.
-EM_JS( int, DL_JS_Save, ( const char *path ), {
-	var dl = Module['etDownload'];
-	Module['etDownload'] = null;
-	if ( !dl || !dl.data ) {
-		return 0;
-	}
-	try {
-		FS.writeFile( UTF8ToString( path ), dl.data );
-		return 1;
-	} catch ( e ) {
-		console.warn( 'download write failed: ' + e );
-		return 0;
-	}
-} );
 
-EM_JS( void, DL_JS_Cancel, ( void ), {
-	Module['etDownload'] = null;
-} );
 
 void DL_InitDownload( void ) {
 }

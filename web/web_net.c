@@ -17,6 +17,7 @@
 
 #include "../src/game/q_shared.h"
 #include "../src/qcommon/qcommon.h"
+#include "web_js.h"
 
 #define RELAY_DATA      0x00
 #define RELAY_RESOLVE   0x01
@@ -34,83 +35,9 @@ static int boundPort;
 // ---------------------------------------------------------------------------
 // JS side: the socket and an incoming message queue
 
-EM_JS( int, NET_JS_Open, ( void ), {
-	var url = Module['etRelay'];
-	if ( !url || typeof WebSocket === 'undefined' ) {
-		return 0;
-	}
-	var net = Module['etNet'];
-	if ( net && net.ws && net.ws.readyState <= 1 ) {
-		return 1;
-	}
-	net = Module['etNet'] = { ws: null, queue: [], outbox: [], open: false };
-	var ws;
-	try {
-		ws = new WebSocket( url );
-	} catch ( e ) {
-		console.warn( 'relay: ' + e );
-		return 0;
-	}
-	ws.binaryType = 'arraybuffer';
-	ws.onopen = function() {
-		net.open = true;
-		for ( var i = 0; i < net.outbox.length; i++ ) {
-			ws.send( net.outbox[i] );
-		}
-		net.outbox = [];
-	};
-	ws.onmessage = function( ev ) {
-		if ( net.queue.length < 4096 ) {
-			net.queue.push( new Uint8Array( ev.data ) );
-		}
-	};
-	ws.onclose = function() {
-		if ( net.open ) {
-			console.warn( 'relay connection closed' );
-		} else {
-			console.warn( 'relay unavailable at ' + url + ' (online play disabled)' );
-		}
-		net.open = false;
-	};
-	net.ws = ws;
-	return 1;
-} );
 
-EM_JS( void, NET_JS_Close, ( void ), {
-	var net = Module['etNet'];
-	if ( net && net.ws ) {
-		net.ws.onclose = null;
-		net.ws.close();
-	}
-	Module['etNet'] = null;
-} );
 
-EM_JS( void, NET_JS_Send, ( const byte *data, int len ), {
-	var net = Module['etNet'];
-	if ( !net || !net.ws ) {
-		return;
-	}
-	var msg = HEAPU8.slice( data, data + len );
-	if ( net.open ) {
-		if ( net.ws.bufferedAmount < 1048576 ) {
-			net.ws.send( msg );
-		}
-	} else if ( net.ws.readyState === 0 && net.outbox.length < 256 ) {
-		net.outbox.push( msg );
-	}
-} );
 
-// Copies the next queued relay message into buf; returns its length or -1.
-EM_JS( int, NET_JS_Recv, ( byte *buf, int max ), {
-	var net = Module['etNet'];
-	if ( !net || !net.queue.length ) {
-		return -1;
-	}
-	var m = net.queue.shift();
-	var n = Math.min( m.length, max );
-	HEAPU8.set( m.subarray( 0, n ), buf );
-	return n;
-} );
 
 // ---------------------------------------------------------------------------
 

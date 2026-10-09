@@ -12,90 +12,14 @@
 #include "../src/game/q_shared.h"
 #include "../src/qcommon/qcommon.h"
 #include "../src/client/snd_local.h"
+#include "web_js.h"
 
 #define DMA_SAMPLES     32768   // mono samples (16384 stereo frames)
 
 static byte *dmaBuffer;
 
-EM_JS( int, SND_JS_Init, ( byte *buffer, int frames, int rate ), {
-	var AC = window.AudioContext || window.webkitAudioContext;
-	if ( !AC ) {
-		return 0;
-	}
-	var ctx;
-	try {
-		ctx = new AC( { sampleRate: rate, latencyHint: 'interactive' } );
-	} catch ( e ) {
-		ctx = new AC( { latencyHint: 'interactive' } );
-	}
-	var snd = {
-		ctx: ctx,
-		buffer: buffer,
-		frames: frames,
-		pos: 0,         // read position in frames
-		frac: 0.0,
-		step: rate / ctx.sampleRate
-	};
-	var node = ctx.createScriptProcessor( 1024, 0, 2 );
-	node.onaudioprocess = function( ev ) {
-		var outL = ev.outputBuffer.getChannelData( 0 );
-		var outR = ev.outputBuffer.getChannelData( 1 );
-		var heap = HEAP16;
-		var base = snd.buffer >> 1;
-		var n = outL.length, pos = snd.pos, frac = snd.frac, step = snd.step, frames = snd.frames;
-		for ( var i = 0; i < n; i++ ) {
-			var i0 = base + pos * 2;
-			var next = pos + 1 === frames ? 0 : pos + 1;
-			var i1 = base + next * 2;
-			outL[i] = ( heap[i0] + ( heap[i1] - heap[i0] ) * frac ) / 32768;
-			outR[i] = ( heap[i0 + 1] + ( heap[i1 + 1] - heap[i0 + 1] ) * frac ) / 32768;
-			frac += step;
-			while ( frac >= 1.0 ) {
-				frac -= 1.0;
-				pos = pos + 1 === frames ? 0 : pos + 1;
-			}
-		}
-		snd.pos = pos;
-		snd.frac = frac;
-	};
-	node.connect( ctx.destination );
-	snd.node = node;
-	Module['etSound'] = snd;
 
-	// autoplay policy: audio starts on the first user gesture
-	var resume = function() {
-		if ( ctx.state !== 'running' ) {
-			ctx.resume();
-		}
-	};
-	document.addEventListener( 'pointerdown', resume, true );
-	document.addEventListener( 'keydown', resume, true );
 
-	// the engine stops mixing while the tab is hidden (no animation frames),
-	// so stop playback instead of looping the stale ring buffer
-	document.addEventListener( 'visibilitychange', function() {
-		if ( document.hidden ) {
-			ctx.suspend();
-		} else {
-			resume();
-		}
-	} );
-	return 1;
-} );
-
-EM_JS( int, SND_JS_GetPos, ( void ), {
-	var snd = Module['etSound'];
-	return snd ? snd.pos * 2 : 0;
-} );
-
-EM_JS( void, SND_JS_Shutdown, ( void ), {
-	var snd = Module['etSound'];
-	if ( snd ) {
-		snd.node.disconnect();
-		snd.ctx.close();
-		Module['etSound'] = null;
-	}
-} );
 
 qboolean SNDDMA_Init( void ) {
 	cvar_t *s_khz = Cvar_Get( "s_khz", "22", CVAR_ARCHIVE | CVAR_LATCH );
