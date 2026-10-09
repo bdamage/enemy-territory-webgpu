@@ -283,7 +283,15 @@ You or the server may be running older versions of the game. Press the auto-upda
 #ifndef MASTER_SERVER_NAME
 	#define MASTER_SERVER_NAME      "etmaster.idsoftware.com"
 #endif
+#ifdef __EMSCRIPTEN__
+// web: id's and Activision's hosts are gone (and the names now belong to
+// others), so MOTD goes to ET: Legacy's master and auto-update is disabled
+// (an empty name fails to resolve)
+	#define MOTD_SERVER_NAME        "etmaster.etlegacy.com"
+	#define AUTOUPDATE_SERVER_NAME  ""
+#else
 #define MOTD_SERVER_NAME        "etmaster.idsoftware.com"    //"etmotd.idsoftware.com"			// ?.?.?.?
+#endif
 
 #ifdef AUTHORIZE_SUPPORT
 	#define AUTHORIZE_SERVER_NAME   "wolfauthorize.idsoftware.com"
@@ -655,6 +663,7 @@ but that's a C++ construct ..
 #define FS_EXCLUDE_DIR 0x1
 #define FS_EXCLUDE_PK3 0x2
 int FS_FOpenFileRead_Filtered( const char *qpath, fileHandle_t *file, qboolean uniqueFILE, int filter_flag );
+qboolean FS_ModPakHasFile( const char *filename );
 
 int     FS_FileIsInPAK( const char *filename, int *pChecksum );
 // returns 1 if a file is in the PAK file, otherwise -1

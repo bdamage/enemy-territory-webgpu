@@ -2,7 +2,7 @@
 #
 #   make            release build into dist/
 #   make DEBUG=1    unoptimised build with assertions
-#   make serve      serve dist/ (and data/) on http://localhost:8080
+#   make serve      serve dist/ + data/ and the UDP relay on http://localhost:8080
 #
 # The game/cgame/ui modules are normally separate .so files. Here they are
 # linked statically into one wasm binary. Each module is compiled twice: the
@@ -29,7 +29,10 @@ WARN := -Wno-everything -Wimplicit-function-declaration \
         -Wno-error=implicit-function-declaration \
         -Wincompatible-function-pointer-types -Wno-error=incompatible-function-pointer-types
 
-CFLAGS_BASE := $(OPT) $(WARN) -fno-strict-aliasing -std=gnu99 -fcommon \
+# id's master is long gone; ET: Legacy's master also lists 2.60b servers
+MASTER := -DMASTER_SERVER_NAME='"etmaster.etlegacy.com"'
+
+CFLAGS_BASE := $(OPT) $(WARN) $(MASTER) -fno-strict-aliasing -std=gnu99 -fcommon \
                -Wno-error=int-conversion -Wno-error=incompatible-pointer-types \
                -Wno-error=implicit-int -Wno-error=return-type
 CXXFLAGS_BASE := $(OPT) -Wno-everything -fno-strict-aliasing -std=gnu++98
@@ -53,7 +56,7 @@ RENDERER := tr_animation_mdm tr_animation_mds tr_backend tr_bsp tr_cmds \
 SERVER := sv_bot sv_ccmds sv_client sv_game sv_init sv_main sv_net_chan \
         sv_snapshot sv_world
 QCOMMON := cm_load cm_patch cm_polylib cm_test cm_trace cmd common cvar \
-        files huffman md4 msg net_chan unzip vm vm_interpreted dl_main_stubs
+        files huffman md4 msg net_chan unzip vm vm_interpreted
 CLIENT := cl_cgame cl_cin cl_console cl_input cl_keys cl_main cl_net_chan \
         cl_parse cl_scrn cl_ui snd_adpcm snd_dma snd_mem snd_mix snd_wavelet
 BOTLIB := be_aas_bspq3 be_aas_cluster be_aas_debug be_aas_entity be_aas_file \
@@ -63,7 +66,7 @@ BOTLIB := be_aas_bspq3 be_aas_cluster be_aas_debug be_aas_entity be_aas_file \
         be_interface l_crc l_libvar l_log l_memory l_precomp l_script l_struct
 SPLINES := math_angles math_matrix math_quaternion math_vector q_parse \
         splines util_str
-WEB := sys_web web_input web_snd web_net web_modules wgl_state wgl_draw \
+WEB := sys_web web_input web_snd web_net web_dl web_modules wgl_state wgl_draw \
         wgl_texture wgl_device
 
 CORE_OBJS := \
@@ -214,7 +217,7 @@ $(BUILD)/ui/%.o: $(S)/%.c $(BUILD)/prefix/ui.h
 # ---------------------------------------------------------------------------
 
 serve: all
-	python3 tools/serve.py
+	node tools/server.mjs
 
 clean:
 	rm -rf $(BUILD) $(DIST)

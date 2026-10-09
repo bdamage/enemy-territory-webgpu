@@ -4344,3 +4344,35 @@ unsigned int FS_ChecksumOSPath( char *OSPath ) {
 	return checksum;
 }
 
+
+/*
+================
+FS_ModPakHasFile
+
+True if a pk3 belonging to the current mod (fs_game, not the base game)
+contains the file. The web build uses it to detect mods that ship their own
+client binaries, which it can't load.
+================
+*/
+qboolean FS_ModPakHasFile( const char *filename ) {
+	searchpath_t *search;
+	fileInPack_t *pakFile;
+	long hash;
+
+	if ( !fs_searchpaths || !fs_gamedirvar || !fs_gamedirvar->string[0]
+		 || !Q_stricmp( fs_gamedirvar->string, BASEGAME ) ) {
+		return qfalse;
+	}
+	for ( search = fs_searchpaths ; search ; search = search->next ) {
+		if ( !search->pack || Q_stricmp( search->pack->pakGamename, fs_gamedirvar->string ) ) {
+			continue;
+		}
+		hash = FS_HashFileName( filename, search->pack->hashSize );
+		for ( pakFile = search->pack->hashTable[hash]; pakFile; pakFile = pakFile->next ) {
+			if ( !FS_FilenameCompare( pakFile->name, filename ) ) {
+				return qtrue;
+			}
+		}
+	}
+	return qfalse;
+}

@@ -664,14 +664,30 @@ void CL_ParseDownload( msg_t *msg ) {
 	unsigned char data[MAX_MSGLEN];
 	int block;
 
+	// read the data
+	block = MSG_ReadShort( msg );
+
 	if ( !*cls.downloadTempName ) {
+		// Consume the message before bailing out, or the rest of the server
+		// message is parsed as garbage. Happens when a www download finishes
+		// before the server has stopped repeating its redirect.
+		if ( block == -1 ) {
+			MSG_ReadString( msg );
+			MSG_ReadLong( msg );
+			MSG_ReadLong( msg );
+			return;
+		}
+		if ( !block && MSG_ReadLong( msg ) < 0 ) {
+			MSG_ReadString( msg );
+		}
+		size = MSG_ReadShort( msg );
+		if ( size > 0 && size <= sizeof( data ) ) {
+			MSG_ReadData( msg, data, size );
+		}
 		Com_Printf( "Server sending download, but no download was requested\n" );
 		CL_AddReliableCommand( "stopdl" );
 		return;
 	}
-
-	// read the data
-	block = MSG_ReadShort( msg );
 
 	// TTimo - www dl
 	// if we haven't acked the download redirect yet

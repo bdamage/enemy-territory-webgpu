@@ -62,6 +62,8 @@ static staticModule_t modules[] = {
 	{ "ui", UiEntry, ui__dllEntry },
 };
 
+char *Sys_GetDLLName( const char *name );
+
 void *QDECL Sys_LoadDll( const char *name, char *fqpath, int( QDECL **entryPoint ) ( int, ... ),
 						 int ( QDECL *systemcalls )( int, ... ) ) {
 	int i;
@@ -71,6 +73,36 @@ void *QDECL Sys_LoadDll( const char *name, char *fqpath, int( QDECL **entryPoint
 		if ( !Q_stricmp( name, modules[i].name ) ) {
 			Com_Printf( "Sys_LoadDll(%s): statically linked module\n", name );
 			Q_strncpyz( fqpath, va( "static:%s", name ), MAX_QPATH );
+#ifndef DEDICATED
+			// Mods that ship their own cgame binary in their pk3s can't
+			// run here: only the stock game code is compiled in.
+			// Server-side-only mods fall back to it, as on desktop. (The
+			// stock ui copes with mod menus, so it isn't checked -- and
+			// erroring there would recurse during error recovery.)
+			if ( i == 1 && FS_ModPakHasFile( Sys_GetDLLName( name ) ) ) {
+				char mod[MAX_QPATH];
+
+				// back to the base game first, so the menus shown with the
+				// error (and afterwards) aren't the mod's
+				Q_strncpyz( mod, Cvar_VariableString( "fs_game" ), sizeof( mod ) );
+				Cvar_Set( "fs_game", "" );
+				FS_PureServerSetLoadedPaks( "", "" );
+				FS_Restart( 0 );
+				Com_Error( ERR_DROP, "This server runs the mod \"%s\", which needs its own client code.\n"
+						   "The browser version can only join servers running the standard game (etmain) "
+						   "or server-side-only mods.", mod );
+			}
+			// Pure servers expect the client to have read its cgame/ui
+			// binary from mp_bin.pk3; touching it marks that pak as
+			// referenced so the checksums the client reports match.
+			if ( i > 0 ) {
+				fileHandle_t f;
+				FS_FOpenFileRead( Sys_GetDLLName( name ), &f, qfalse );
+				if ( f ) {
+					FS_FCloseFile( f );
+				}
+			}
+#endif
 			modules[i].dllEntry( systemcalls );
 			*entryPoint = modules[i].entry;
 			return &modules[i];
@@ -95,6 +127,7 @@ int VM_CallCompiled( vm_t *vm, int *args ) {
 void Sys_UnloadDll( void *dllHandle ) {
 }
 
+// the Linux names, which is what mp_bin.pk3 and pure servers know about
 char *Sys_GetDLLName( const char *name ) {
-	return va( "%s.mp.wasm32", name );
+	return va( "%s.mp.i386.so", name );
 }
