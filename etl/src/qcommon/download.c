@@ -365,6 +365,74 @@ static void checkDownloadName(char *filename)
 	}
 }
 
+#if defined(__EMSCRIPTEN__) && !defined(DEDICATED)
+/*
+ * Web build: official ET: Legacy mod paks (legacy/legacy_vX.Y.Z.pk3) are
+ * fetched over HTTP through the relay (tools/server.mjs, "etlmod:" URLs),
+ * which takes them from the official release instead of the server's slow
+ * in-band download. On failure the normal server download is used.
+ */
+static char webModPakRemote[MAX_OSPATH];
+
+static qboolean Com_IsOfficialModPak(const char *remoteName)
+{
+	const char *base = FS_Basename(remoteName);
+
+	return !Q_stricmpn(remoteName, DEFAULT_MODGAME "/", strlen(DEFAULT_MODGAME) + 1)
+	       && !Q_stricmpn(base, "legacy_v", 8) && strlen(base) > 12
+	       && !Q_stricmp(base + strlen(base) - 4, ".pk3");
+}
+
+static void Com_WebModPakComplete(webRequest_t *request, webRequestResult requestResult)
+{
+	const char *dest;
+
+	Cvar_Set("ui_dl_running", "0");
+	if (requestResult != REQUEST_OK)
+	{
+		Com_Printf("Fetching %s from the official release failed, downloading it from the server\n", webModPakRemote);
+		Com_BeginDownload(dld.downloadName, webModPakRemote);
+		return;
+	}
+
+#if defined(FEATURE_PAKISOLATION)
+	dest = Com_ContainerizePath(dld.downloadTempName, dld.downloadName);
+#else
+	dest = dld.downloadName;
+#endif
+	FS_SV_Rename(dld.downloadTempName, dest);
+	*dld.downloadTempName = *dld.downloadName = 0;
+	Cvar_Set("cl_downloadName", "");
+	Com_NextDownload();
+}
+
+static qboolean Com_BeginWebModPakDownload(const char *localName, const char *remoteName)
+{
+	if (!Com_IsOfficialModPak(remoteName))
+	{
+		return qfalse;
+	}
+
+	Com_Printf("Client downloading: %s (official release)\n", remoteName);
+	Q_strncpyz(webModPakRemote, remoteName, sizeof(webModPakRemote));
+	Q_strncpyz(dld.downloadName, localName, sizeof(dld.downloadName));
+	Com_sprintf(dld.downloadTempName, sizeof(dld.downloadTempName), "%s.tmp", localName);
+	Cvar_Set("cl_downloadName", remoteName);
+	Cvar_Set("cl_downloadSize", "0");
+	Cvar_Set("cl_downloadCount", "0");
+	Cvar_SetValue("cl_downloadTime", cls.realtime);
+	Cvar_Set("ui_dl_running", "1");
+
+	if (!DL_BeginDownload(FS_BuildOSPath(Cvar_VariableString("fs_homepath"), dld.downloadTempName, NULL),
+	                      va("etlmod:%s", FS_Basename(remoteName)), NULL, &Com_WebModPakComplete, &Com_WebDownloadProgress))
+	{
+		*dld.downloadTempName = *dld.downloadName = 0;
+		return qfalse;
+	}
+	return qtrue;
+}
+#endif
+
 /**
  * @brief A download completed or failed
  */
@@ -411,6 +479,9 @@ void Com_NextDownload(void)
 
 	checkDownloadName(remoteName);
 
+#if defined(__EMSCRIPTEN__) && !defined(DEDICATED)
+	if (!Com_BeginWebModPakDownload(localName, remoteName))
+#endif
 	Com_BeginDownload(localName, remoteName);
 
 	dld.downloadRestart = qtrue;

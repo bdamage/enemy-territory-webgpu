@@ -25,7 +25,9 @@ unsigned int DL_BeginDownload( const char *localName, const char *remoteName, vo
 		Com_Printf( S_COLOR_RED "DL_BeginDownload: Error - empty download URL or empty local file name\n" );
 		return 0;
 	}
-	if ( Q_stricmpn( remoteName, "http://", 7 ) && Q_stricmpn( remoteName, "https://", 8 ) ) {
+	// http(s) URLs, or "etlmod:<pak>" for official mod paks (download.c)
+	if ( Q_stricmpn( remoteName, "http://", 7 ) && Q_stricmpn( remoteName, "https://", 8 )
+		 && Q_stricmpn( remoteName, "etlmod:", 7 ) ) {
 		Com_Printf( S_COLOR_RED "DL_BeginDownload: Error - unsupported URL %s\n", remoteName );
 		return 0;
 	}

@@ -3,7 +3,7 @@
 // and runs the WebSocket <-> UDP relay that gives browsers network access.
 //
 //   node tools/server.mjs [--port 8080] [--host 127.0.0.1]
-//                         [--ports 27000-28000] [--no-private] [--no-static]
+//                         [--ports 1024-65535] [--no-private] [--no-static]
 //
 // Relay protocol (binary WebSocket messages, first byte = type):
 //   0x00 DATA     c->s  [ip:4][port:2 BE][payload]   send a UDP datagram
@@ -20,6 +20,7 @@
 // client uses placeholder addresses in 240.0.0.0/8 and the relay translates.
 
 import http from 'node:http';
+import zlib from 'node:zlib';
 import dgram from 'node:dgram';
 import dns from 'node:dns/promises';
 import crypto from 'node:crypto';
@@ -32,7 +33,7 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // ---------------------------------------------------------------------------
 // options
 
-const opts = { port: 8080, host: '127.0.0.1', ports: [27000, 28000], private: true, static: true };
+const opts = { port: 8080, host: '127.0.0.1', ports: [1024, 65535], private: true, static: true };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i];
   if (a === '--port') opts.port = +process.argv[++i];
@@ -350,8 +351,91 @@ async function checkDownloadURL(raw) {
   return u;
 }
 
+// ---------------------------------------------------------------------------
+// etlmod:legacy_vX.Y.Z.pk3 -- official ET: Legacy mod paks. Servers without
+// HTTP downloads would otherwise send these 30+ MB files in-band, which
+// takes minutes; instead the relay fetches the official release archive
+// from etlegacy.com once, extracts the pk3 and caches it.
+
+const MODPAK_CACHE = path.join(ROOT, 'data', 'etlmod-cache');
+const modPakJobs = new Map();
+
+// Minimal zip reader: finds `name` via the central directory and inflates it.
+function zipExtract(buf, name) {
+  let eocd = buf.length - 22;
+  while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  if (eocd < 0) throw new Error('not a zip archive');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('bad central directory');
+    const method = buf.readUInt16LE(p + 10);
+    const csize = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const entry = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    if (path.posix.basename(entry) === name) {
+      const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+      const data = buf.subarray(start, start + csize);
+      if (method === 0) return data;
+      if (method === 8) return zlib.inflateRawSync(data);
+      throw new Error(`unsupported zip method ${method}`);
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  throw new Error(`${name} not found in archive`);
+}
+
+async function fetchModPak(name, version) {
+  const parts = version.split('.');
+  const ids = [parts.join(''), parts.slice(0, 2).join('')];
+  for (const id of ids) {
+    const page = await fetch(`https://www.etlegacy.com/download/release/${id}`);
+    if (!page.ok) continue;
+    const files = [...(await page.text()).matchAll(/data-href="(https:\/\/www\.etlegacy\.com\/download\/file\/\d+)"/g)].map((m) => m[1]);
+    for (const url of files) {
+      const head = await fetch(url, { method: 'HEAD' });
+      const disposition = head.headers.get('content-disposition') || '';
+      if (!/mod[^"]*\.zip/i.test(disposition)) continue;
+      log(`etlmod: fetching ${disposition.replace(/.*filename=/, '')} for ${name}`);
+      const zip = Buffer.from(await (await fetch(url)).arrayBuffer());
+      return zipExtract(zip, name);
+    }
+  }
+  throw new Error(`no official mod archive found for ${version}`);
+}
+
+function officialModPak(name) {
+  const m = /^legacy_v(\d+\.\d+(?:\.\d+)?)\.pk3$/.exec(name);
+  if (!m) return Promise.reject(new Error('not an official mod pak'));
+  const file = path.join(MODPAK_CACHE, name);
+  if (fs.existsSync(file)) return Promise.resolve(file);
+  if (!modPakJobs.has(name)) {
+    modPakJobs.set(name, fetchModPak(name, m[1]).then((data) => {
+      fs.mkdirSync(MODPAK_CACHE, { recursive: true });
+      fs.writeFileSync(file + '.part', data);
+      fs.renameSync(file + '.part', file);
+      log(`etlmod: cached ${name} (${data.length} bytes)`);
+      return file;
+    }).finally(() => modPakJobs.delete(name)));
+  }
+  return modPakJobs.get(name);
+}
+
 async function proxyDownload(req, res) {
   let target = new URL(req.url, 'http://x').searchParams.get('url');
+  if (target && target.startsWith('etlmod:')) {
+    try {
+      const file = await officialModPak(target.slice('etlmod:'.length));
+      const st = fs.statSync(file);
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': st.size });
+      fs.createReadStream(file).pipe(res);
+    } catch (err) {
+      log(`etlmod: ${err.message}`);
+      res.writeHead(404).end(err.message);
+    }
+    return;
+  }
   try {
     for (let hop = 0; hop < 4; hop++) {
       const u = await checkDownloadURL(target);

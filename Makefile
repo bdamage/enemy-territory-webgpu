@@ -1,6 +1,7 @@
 # Wolfenstein: Enemy Territory -> WebAssembly + WebGPU
 #
-#   make            release build into dist/
+#   make            both builds: ET 2.60b into dist/, ET: Legacy into dist/legacy/
+#   make classic    just ET 2.60b          make legacy    just ET: Legacy (etl/Makefile)
 #   make DEBUG=1    unoptimised build with assertions
 #   make serve      serve dist/ + data/ and the UDP relay on http://localhost:8080
 #
@@ -135,7 +136,12 @@ LDFLAGS := $(OPT) $(LDOPT) $(WEBGPU_PORT) \
 	-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_WEB_ConsoleCommand \
 	--pre-js web/pre.js
 
-all: $(DIST)/et.js $(DIST)/index.html
+all: classic legacy
+
+classic: $(DIST)/et.js $(DIST)/index.html
+
+legacy:
+	@$(MAKE) -C etl DEBUG=$(DEBUG)
 
 $(DIST)/et.js: $(ALL_OBJS) web/pre.js
 	@mkdir -p $(DIST)
@@ -222,4 +228,4 @@ serve: all
 clean:
 	rm -rf $(BUILD) $(DIST)
 
-.PHONY: all serve clean
+.PHONY: all classic legacy serve clean

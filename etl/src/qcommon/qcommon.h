@@ -1403,6 +1403,11 @@ qboolean IN_IsNumLockDown(void);
 #define Sys_GetDLLName(x) x DLL_EXT
 #elif __ANDROID__
 #define Sys_GetDLLName(x) "lib" x ".mp.android." ARCH_STRING DLL_EXT
+#elif defined(__EMSCRIPTEN__)
+// The web build runs its compiled-in modules, but pure servers verify the
+// pak a client's cgame/ui binary came from by file name, so it reads (and
+// thereby references) the Linux x86_64 binaries every mod pk3 ships.
+#define Sys_GetDLLName(x) x ".mp.x86_64.so"
 #else
 #define Sys_GetDLLName(x) x ".mp." ARCH_STRING DLL_EXT
 #endif

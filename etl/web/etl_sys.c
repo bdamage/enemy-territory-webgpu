@@ -203,14 +203,32 @@ void *Sys_LoadGameDll( const char *name, qboolean extract, VM_EntryPoint_t *entr
 	const char *gamedir = Cvar_VariableString( "fs_game" );
 	int i;
 
-	if ( gamedir[0] && Q_stricmp( gamedir, DEFAULT_MODGAME ) ) {
-		// only the legacy mod's code is compiled in
-		Com_Printf( "Sys_LoadGameDll(%s): mod \"%s\" is not available in the browser build\n", name, gamedir );
-		return NULL;
+	if ( gamedir[0] && Q_stricmp( gamedir, DEFAULT_MODGAME ) && !Q_stricmp( name, "cgame" ) ) {
+		// Only the legacy mod's code is compiled in. (The ui falls back to
+		// legacy's, as on desktop.) Return to the default mod first so the
+		// menus shown with the error are the normal ones.
+		char mod[MAX_QPATH];
+
+		Q_strncpyz( mod, gamedir, sizeof( mod ) );
+		Cvar_Set( "fs_game", DEFAULT_MODGAME );
+		FS_PureServerSetLoadedPaks( "", "" );
+		FS_Restart( 0 );
+		Com_Error( ERR_DROP, "This server runs the mod \"%s\", which needs its own client code.\n"
+				   "The browser version of ET: Legacy can only join servers running the legacy mod.", mod );
 	}
 	for ( i = 0; i < (int)ARRAY_LEN( modules ); i++ ) {
 		if ( !Q_stricmp( name, modules[i].name ) ) {
 			Com_Printf( "Sys_LoadGameDll(%s): statically linked module\n", name );
+			if ( Q_stricmp( name, "qagame" ) ) {
+				// read the mod pk3's native cgame/ui binary once so the pak
+				// counts as referenced for pure server checks (see
+				// Sys_GetDLLName in qcommon.h)
+				fileHandle_t f;
+				FS_FOpenFileRead( va( Sys_GetDLLName( "%s" ), name ), &f, qfalse );
+				if ( f ) {
+					FS_FCloseFile( f );
+				}
+			}
 			modules[i].dllEntry( systemcalls );
 			*entryPoint = modules[i].entry;
 			return &modules[i];

@@ -30,7 +30,7 @@ OPT     := -O2 -DNDEBUG
 LDOPT   := --profiling-funcs
 endif
 
-PORTS := -sUSE_ZLIB=1 -sUSE_LIBJPEG=1 -sUSE_SDL=2
+PORTS := -sUSE_ZLIB=1 -sUSE_LIBJPEG=1 -sUSE_SDL=2 -sUSE_FREETYPE=1
 WEBGPU_PORT := --use-port=emdawnwebgpu
 
 WARN := -Wno-everything -Wimplicit-function-declaration \
@@ -45,7 +45,7 @@ CFLAGS_BASE := $(OPT) $(WARN) -fno-strict-aliasing -std=gnu11 -fcommon \
 INC := -I$(W) -I$(SHARED) -Ithird_party/minizip -Ithird_party -I$(S)/renderer -I$(S)/qcommon/json
 
 # engine features (see ../README.md for what's off and why)
-ENGINE_DEFS := -DETL_CLIENT=1 -DFEATURE_PAKISOLATION -DFEATURE_MULTIVIEW \
+ENGINE_DEFS := -DETL_CLIENT=1 -DFEATURE_PAKISOLATION -DFEATURE_MULTIVIEW -DFEATURE_FREETYPE \
 	-DMASTER_SERVER_NAME='"etmaster.etlegacy.com"'
 MOD_DEFS := -DMODLIB=1 -DFEATURE_MULTIVIEW -DFEATURE_EDV
 CGAME_DEFS  := -DCGAMEDLL=1 $(MOD_DEFS) -DFEATURE_RATING -DFEATURE_XPSAVE
@@ -56,7 +56,7 @@ QAGAME_DEFS := -DGAMEDLL=1 $(MOD_DEFS) -DFEATURE_SERVERMDX
 # sources
 
 QCOMMON := $(filter-out %/dl_main_curl.c %/dl_main_android.c %/dl_main_stubs.c %/net_ip.c \
-	%/i18n.c %/i18n_findlocale.c %/auth.c, $(wildcard $(S)/qcommon/*.c)) \
+	%/auth.c, $(wildcard $(S)/qcommon/*.c)) \
 	$(S)/qcommon/json/json.c
 ENGINE_SRC := $(QCOMMON) \
 	$(wildcard $(S)/server/*.c) \
@@ -75,9 +75,9 @@ SHARED_WGL := wgl_core wgl_state wgl_draw wgl_texture web_js
 UI_SHARED := $(addprefix $(S)/ui/,ui_shared.c ui_parse.c ui_script.c ui_menu.c ui_menuitem.c)
 MODCOMMON := $(addprefix $(S)/qcommon/,q_math.c q_shared.c version.c)
 
-CGAME_SRC := $(wildcard $(S)/cgame/*.c) $(MODCOMMON) $(S)/qcommon/q_unicode.c \
+CGAME_SRC := $(wildcard $(S)/cgame/*.c) $(MODCOMMON) $(S)/qcommon/q_unicode.c $(S)/qcommon/i18n.c \
 	$(wildcard $(S)/game/bg_*.c) $(UI_SHARED)
-UI_SRC := $(wildcard $(S)/ui/*.c) $(wildcard $(S)/ui/lib/*.c) $(MODCOMMON) $(S)/qcommon/q_unicode.c \
+UI_SRC := $(wildcard $(S)/ui/*.c) $(wildcard $(S)/ui/lib/*.c) $(MODCOMMON) $(S)/qcommon/q_unicode.c $(S)/qcommon/i18n.c \
 	$(S)/game/bg_classes.c $(S)/game/bg_misc.c
 QAGAME_SRC := $(wildcard $(S)/game/*.c) vendor/sha-1/sha1.c $(MODCOMMON)
 

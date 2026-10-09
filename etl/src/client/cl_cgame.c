@@ -1568,6 +1568,9 @@ void CL_FirstSnapshot(void)
 	// set the timedelta so we are exactly on this first frame
 	cl.baselineDelta               = cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
 	cl.oldServerTime               = cl.snap.serverTime;
+	// servers up for more than ~25 days have a negative (wrapped) serverTime,
+	// which would fail the "time went backwards" check in CL_SetCGameTime
+	cl.oldFrameServerTime          = cl.snap.serverTime;
 	clc.demo.timedemo.timeBaseTime = cl.snap.serverTime;
 
 	// if this is the first frame of active play,
