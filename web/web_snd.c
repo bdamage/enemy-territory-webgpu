@@ -70,6 +70,16 @@ EM_JS( int, SND_JS_Init, ( byte *buffer, int frames, int rate ), {
 	};
 	document.addEventListener( 'pointerdown', resume, true );
 	document.addEventListener( 'keydown', resume, true );
+
+	// the engine stops mixing while the tab is hidden (no animation frames),
+	// so stop playback instead of looping the stale ring buffer
+	document.addEventListener( 'visibilitychange', function() {
+		if ( document.hidden ) {
+			ctx.suspend();
+		} else {
+			resume();
+		}
+	} );
 	return 1;
 } );
 
