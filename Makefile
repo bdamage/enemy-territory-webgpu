@@ -66,8 +66,8 @@ BOTLIB := be_aas_bspq3 be_aas_cluster be_aas_debug be_aas_entity be_aas_file \
         be_interface l_crc l_libvar l_log l_memory l_precomp l_script l_struct
 SPLINES := math_angles math_matrix math_quaternion math_vector q_parse \
         splines util_str
-WEB := sys_web web_input web_snd web_net web_dl web_modules wgl_state wgl_draw \
-        wgl_texture wgl_device
+WEB := sys_web web_input web_snd web_net web_dl web_modules glimp_vanilla wgl_core wgl_state wgl_draw \
+        wgl_texture
 
 CORE_OBJS := \
 	$(addprefix $(BUILD)/core/jpeg-6/,$(addsuffix .o,$(JPEG))) \

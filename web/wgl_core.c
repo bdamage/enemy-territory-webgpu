@@ -1,21 +1,23 @@
 /*
- * wgl_device.c -- WebGPU device/surface management and the GLimp_* layer.
+ * wgl_core.c -- WebGPU device, surface, render targets and frame submission
+ * for the GL emulation. Engine-independent: each engine's GLimp layer
+ * (web/glimp_vanilla.c, etl/web/etl_glimp.c) calls WGL_DeviceInit,
+ * WGL_Present and WGL_SetGammaRamp.
  *
  * The scene is rendered into an offscreen RGBA8 target (the GL "back
- * buffer"). GLimp_EndFrame blits it to the canvas through a 256-entry gamma
- * ramp, which stands in for the hardware gamma ramp the original renderer
- * relies on for r_gamma and overbright lighting.
+ * buffer"). WGL_Present blits it to the canvas through a 256-entry gamma
+ * ramp, which stands in for the hardware gamma ramp the original renderers
+ * rely on for r_gamma and overbright lighting.
  */
 #include <stdarg.h>
 #include <stdio.h>
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
-#include "../src/renderer/tr_local.h"
 #include "wgl_local.h"
 
 wglDevice_t wgl;
-int gl_NormalFontBase = 0;     // display-list font for r_debugSurface text (unsupported)
+void ( *WGL_PrintHook )( const char *msg );
 
 void WGL_InitState( int width, int height );
 
@@ -68,10 +70,10 @@ void WGL_Printf( const char *fmt, ... ) {
 	char msg[1024];
 
 	va_start( ap, fmt );
-	Q_vsnprintf( msg, sizeof( msg ), fmt, ap );
+	vsnprintf( msg, sizeof( msg ), fmt, ap );
 	va_end( ap );
-	if ( ri.Printf ) {
-		ri.Printf( PRINT_ALL, "%s", msg );
+	if ( WGL_PrintHook ) {
+		WGL_PrintHook( msg );
 	} else {
 		fputs( msg, stdout );
 	}
@@ -261,20 +263,17 @@ static void DestroyBlit( void ) {
 }
 
 // ---------------------------------------------------------------------------
-// GLimp interface
+// public interface
 
-void GLimp_Init( void ) {
+// Creates the device objects (first call) and the render targets sized to
+// the canvas. Returns the render size.
+void WGL_DeviceInit( int *width, int *height ) {
 	WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvasSrc = WGPU_EMSCRIPTEN_SURFACE_SOURCE_CANVAS_HTML_SELECTOR_INIT;
 	WGPUSurfaceDescriptor sd = WGPU_SURFACE_DESCRIPTOR_INIT;
-
-	ri.Printf( PRINT_ALL, "Initializing WebGPU renderer\n" );
 
 	if ( !wgl.device ) {
 		wgl.instance = wgpuCreateInstance( NULL );
 		wgl.device = emscripten_webgpu_get_device();
-		if ( !wgl.device ) {
-			ri.Error( ERR_FATAL, "GLimp_Init: no WebGPU device" );
-		}
 		wgl.queue = wgpuDeviceGetQueue( wgl.device );
 		canvasSrc.selector.data = "#canvas";
 		canvasSrc.selector.length = WGPU_STRLEN;
@@ -290,34 +289,13 @@ void GLimp_Init( void ) {
 	CreateBlit();
 	WGL_InitState( wgl.width, wgl.height );
 
-	glConfig.vidWidth = wgl.width;
-	glConfig.vidHeight = wgl.height;
-	glConfig.windowAspect = (float)wgl.width / (float)wgl.height;
-	glConfig.colorBits = 32;
-	glConfig.depthBits = 24;
-	glConfig.stencilBits = 8;
-	glConfig.isFullscreen = qfalse;
-	glConfig.displayFrequency = 60;
-	glConfig.driverType = GLDRV_ICD;
-	glConfig.hardwareType = GLHW_GENERIC;
-	glConfig.deviceSupportsGamma = qtrue;
-	glConfig.textureCompression = TC_NONE;
-	glConfig.textureEnvAddAvailable = qtrue;
-	glConfig.maxActiveTextures = WGL_UNITS;
-	glConfig.anisotropicAvailable = qtrue;
-	glConfig.NVFogAvailable = qfalse;
-	glConfig.smpActive = qfalse;
-	Q_strncpyz( glConfig.vendor_string, (const char *)wgGetString( GL_VENDOR ), sizeof( glConfig.vendor_string ) );
-	Q_strncpyz( glConfig.renderer_string, (const char *)wgGetString( GL_RENDERER ), sizeof( glConfig.renderer_string ) );
-	Q_strncpyz( glConfig.version_string, (const char *)wgGetString( GL_VERSION ), sizeof( glConfig.version_string ) );
-	Q_strncpyz( glConfig.extensions_string, (const char *)wgGetString( GL_EXTENSIONS ), sizeof( glConfig.extensions_string ) );
-
-	ri.Cvar_Set( "r_lastValidRenderer", glConfig.renderer_string );
-	ri.Printf( PRINT_ALL, "WebGPU: %dx%d, canvas format %s\n", wgl.width, wgl.height,
-			   wgl.surfaceFormat == WGPUTextureFormat_BGRA8Unorm ? "bgra8unorm" : "rgba8unorm" );
+	*width = wgl.width;
+	*height = wgl.height;
+	WGL_Printf( "WebGPU: %dx%d, canvas format %s\n", wgl.width, wgl.height,
+				wgl.surfaceFormat == WGPUTextureFormat_BGRA8Unorm ? "bgra8unorm" : "rgba8unorm" );
 }
 
-void GLimp_Shutdown( void ) {
+void WGL_DeviceShutdown( void ) {
 	if ( !wgl.device ) {
 		return;
 	}
@@ -328,17 +306,19 @@ void GLimp_Shutdown( void ) {
 	WGL_ShutdownDraw();
 	WGL_ShutdownTextures();
 	DestroyTargets();
-	memset( &glConfig, 0, sizeof( glConfig ) );
 }
 
-void GLimp_EndFrame( void ) {
+// Finishes the frame: applies pending clears, blits the scene to the canvas
+// through the gamma ramp and submits. Presentation happens when control
+// returns to the browser.
+void WGL_Present( void ) {
 	WGPUSurfaceTexture st = WGPU_SURFACE_TEXTURE_INIT;
 	WGPURenderPassDescriptor rp = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
 	WGPURenderPassColorAttachment ca = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
 	WGPURenderPassEncoder bp;
 	WGPUTextureView view;
 
-	if ( deviceLost ) {
+	if ( deviceLost || !wgl.device ) {
 		return;
 	}
 
@@ -370,31 +350,12 @@ void GLimp_EndFrame( void ) {
 	WGL_UploadStreams();
 	WGL_SubmitEncoder();
 	WGL_ResetStreams();
-	// presentation happens when control returns to the browser
 }
 
-void GLimp_SetGamma( unsigned char red[256], unsigned char green[256], unsigned char blue[256] ) {
+void WGL_SetGammaRamp( const unsigned char *red, const unsigned char *green, const unsigned char *blue ) {
 	if ( gammaTex ) {
 		WriteGammaRamp( red, green, blue );
 	}
-}
-
-void GLimp_LogComment( char *comment ) {
-}
-
-// no SMP on the web
-qboolean GLimp_SpawnRenderThread( void ( *function )( void ) ) {
-	return qfalse;
-}
-
-void *GLimp_RendererSleep( void ) {
-	return NULL;
-}
-
-void GLimp_FrontEndSleep( void ) {
-}
-
-void GLimp_WakeRenderer( void *data ) {
 }
 
 // called from JS if the GPU device goes away

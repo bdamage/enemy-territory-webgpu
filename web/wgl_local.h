@@ -178,6 +178,14 @@ typedef struct {
 
 extern wglDevice_t wgl;
 
+// engine-facing API (wgl_core.c)
+void    WGL_DeviceInit( int *width, int *height );
+void    WGL_DeviceShutdown( void );
+void    WGL_Present( void );
+void    WGL_SetGammaRamp( const unsigned char *red, const unsigned char *green, const unsigned char *blue );
+extern void ( *WGL_PrintHook )( const char *msg );
+void    WGL_InitState( int width, int height );
+
 WGPUCommandEncoder WGL_Encoder( void );
 void    WGL_Flush( void );          // end pass, upload streams, submit
 void    WGL_SubmitEncoder( void );
