@@ -473,9 +473,12 @@ void SV_TouchCGameDLL( void ) {
 	FS_FOpenFileRead_Filtered( filename, &f, qfalse, FS_EXCLUDE_DIR );
 	if ( f ) {
 		FS_FCloseFile( f );
-	} else if ( sv_pure->integer ) { // ydnar: so we can work the damn game
+	}
+#ifndef __EMSCRIPTEN__  // web: modules are compiled in, there is no mp_bin.pk3 to check
+	else if ( sv_pure->integer ) { // ydnar: so we can work the damn game
 		Com_Error( ERR_DROP, "Failed to locate cgame DLL for pure server mode" );
 	}
+#endif
 }
 
 /*
@@ -779,7 +782,13 @@ void SV_Init( void ) {
 	//bani - added cvar_t for sv_cheats so server engine can reference it
 	sv_cheats = Cvar_Get( "sv_cheats", "1", CVAR_SYSTEMINFO | CVAR_ROM );
 	sv_serverid = Cvar_Get( "sv_serverid", "0", CVAR_SYSTEMINFO | CVAR_ROM );
+#ifdef __EMSCRIPTEN__
+	// web: the game modules are compiled in, so there is no mp_bin.pk3 for
+	// pure checks to verify against
+	sv_pure = Cvar_Get( "sv_pure", "0", CVAR_SYSTEMINFO );
+#else
 	sv_pure = Cvar_Get( "sv_pure", "1", CVAR_SYSTEMINFO );
+#endif
 	Cvar_Get( "sv_paks", "", CVAR_SYSTEMINFO | CVAR_ROM );
 	Cvar_Get( "sv_pakNames", "", CVAR_SYSTEMINFO | CVAR_ROM );
 	Cvar_Get( "sv_referencedPaks", "", CVAR_SYSTEMINFO | CVAR_ROM );

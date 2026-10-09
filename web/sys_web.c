@@ -362,20 +362,25 @@ EM_JS( void, Sys_JS_Print, ( const char *msg ), {
 	}
 } );
 
+// Line-buffered: the engine prints partial lines, the browser console doesn't.
 void Sys_Print( const char *msg ) {
-	char clean[MAXPRINTMSG];
-	int i, j;
+	static char line[MAXPRINTMSG];
+	static int len;
+	int i;
 
-	// strip Q3 color codes for the browser console
-	for ( i = 0, j = 0; msg[i] && j < (int)sizeof( clean ) - 1; i++ ) {
-		if ( Q_IsColorString( &msg[i] ) ) {
+	for ( i = 0; msg[i]; i++ ) {
+		if ( Q_IsColorString( &msg[i] ) ) {     // strip Q3 color codes
 			i++;
 			continue;
 		}
-		clean[j++] = msg[i];
+		if ( msg[i] == '\n' || len == (int)sizeof( line ) - 1 ) {
+			line[len] = 0;
+			Sys_JS_Print( line );
+			len = 0;
+			continue;
+		}
+		line[len++] = msg[i];
 	}
-	clean[j] = 0;
-	Sys_JS_Print( clean );
 }
 
 EM_JS( void, Sys_JS_Fatal, ( const char *msg ), {
@@ -589,6 +594,7 @@ int main( int argc, char **argv ) {
 	Sys_Milliseconds();
 	memset( eventQue, 0, sizeof( eventQue ) );
 
+	Sys_Print( va( "command line: %s\n", sys_cmdline ) );
 	Com_Init( sys_cmdline );
 	NET_Init();
 
