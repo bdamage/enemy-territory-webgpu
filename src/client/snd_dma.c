@@ -2792,6 +2792,22 @@ void S_FreeOldestSound( void ) {
 		}
 	}
 
+	// if every loaded sound was used this very millisecond (all registered
+	// within one load), nothing qualifies and SND_malloc would spin forever;
+	// take the least recently used sound instead
+	if ( !used ) {
+		for ( i = 1 ; i < snd.s_numSfx ; i++ ) {
+			sfx = &s_knownSfx[i];
+			if ( sfx->inMemory && ( !used || sfx->lastTimeUsed < oldest ) ) {
+				used = i;
+				oldest = sfx->lastTimeUsed;
+			}
+		}
+		if ( !used ) {
+			Com_Error( ERR_FATAL, "S_FreeOldestSound: out of sound memory (com_soundMegs)" );
+		}
+	}
+
 	sfx = &s_knownSfx[used];
 
 	Com_DPrintf( "S_FreeOldestSound: freeing sound %s\n", sfx->soundName );

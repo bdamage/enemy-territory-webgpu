@@ -13,6 +13,7 @@
 #include <stdarg.h>
 #include "../src/game/q_shared.h"
 #include "../src/qcommon/qcommon.h"
+#include "web_js.h"
 
 typedef int ( *syscall_t )( int, ... );
 
@@ -103,6 +104,7 @@ void *QDECL Sys_LoadDll( const char *name, char *fqpath, int( QDECL **entryPoint
 				}
 			}
 #endif
+			WEB_ModuleDataReset( name );    // a fresh copy, as a dlopen would give
 			modules[i].dllEntry( systemcalls );
 			*entryPoint = modules[i].entry;
 			return &modules[i];

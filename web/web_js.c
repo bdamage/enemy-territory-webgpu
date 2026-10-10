@@ -32,6 +32,23 @@ EM_JS( void, Sys_JS_OpenURL, ( const char *url ), {
 	window.open( UTF8ToString( url ), '_blank', 'noopener' );
 } );
 
+// Hands a file the game wrote (a screenshot, say) to the user as a browser
+// download; files in the IndexedDB-backed home directory aren't reachable
+// otherwise.
+EM_JS( void, WEB_OfferFile, ( const char *name, const void *data, int len ), {
+	var fileName = UTF8ToString( name ).replace( /^.*[\\/]/, '' );
+	var ext = fileName.split( '.' ).pop().toLowerCase();
+	var types = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', tga: 'image/x-tga' };
+	var blob = new Blob( [ HEAPU8.slice( data, data + len ) ], { type: types[ext] || 'application/octet-stream' } );
+	var a = document.createElement( 'a' );
+	a.href = URL.createObjectURL( blob );
+	a.download = fileName;
+	document.body.appendChild( a );
+	a.click();
+	a.remove();
+	setTimeout( function() { URL.revokeObjectURL( a.href ); }, 10000 );
+} );
+
 // from sys_web.c
 EM_JS( void, Sys_JS_Print, ( const char *msg ), {
 	var s = UTF8ToString( msg );
@@ -317,3 +334,84 @@ EM_JS( void, DL_JS_Cancel, ( void ), {
 EMSCRIPTEN_KEEPALIVE void WEB_SyncFS( void ) {
 	Sys_JS_SyncFS();
 }
+
+// ---------------------------------------------------------------------------
+// loading screens (web_frame.c)
+
+// Asyncify can only suspend through functions it instrumented, which the
+// build lists in ASYNCIFY_ONLY (also handed to the page as
+// Module.asyncifyFunctions). Checks that every wasm frame on the current
+// stack is one of them, and logs the ones that aren't once per call path.
+EM_JS( int, WEB_JS_CanSuspend, ( void ), {
+	var list = Module['asyncifyFunctions'];
+	if ( !list || typeof Asyncify == 'undefined' ) {
+		return 0;
+	}
+	if ( !Module['asyncifyAllowed'] ) {
+		// exact names, plus "prefix*" patterns (static functions get
+		// build-specific suffixes when names collide)
+		var exact = new Set(), prefixes = [];
+		list.forEach( function( n ) {
+			if ( n.charAt( n.length - 1 ) == '*' ) {
+				prefixes.push( n.slice( 0, -1 ) );
+			} else {
+				exact.add( n );
+			}
+		} );
+		Module['asyncifyAllowed'] = function( n ) {
+			return exact.has( n ) || prefixes.some( function( p ) { return n.indexOf( p ) == 0; } );
+		};
+	}
+	var allowed = Module['asyncifyAllowed'];
+	var limit = Error.stackTraceLimit;
+	Error.stackTraceLimit = 1000;
+	var stack = new Error().stack || '';
+	Error.stackTraceLimit = limit;
+
+	var lines = stack.split( '\n' ), names = [];
+	for ( var i = 0; i < lines.length; i++ ) {
+		var line = lines[i].trim(), name;
+		if ( line.indexOf( '.wasm:' ) < 0 && line.indexOf( 'wasm-function' ) < 0 && line.indexOf( '[wasm code]' ) < 0 ) {
+			continue;   // a JS frame (this function, the main loop runner)
+		}
+		// V8: "at $name (.../etl.wasm:1:123)" or "at etl.wasm.name (...)";
+		// SpiderMonkey and JavaScriptCore: "name@..."
+		if ( line.indexOf( 'at ' ) == 0 ) {
+			name = line.slice( 3, line.indexOf( ' ', 3 ) );
+		} else {
+			name = line.slice( 0, line.indexOf( '@' ) );
+		}
+		if ( name.indexOf( '.wasm.' ) >= 0 ) {
+			name = name.slice( name.indexOf( '.wasm.' ) + 6 );
+		}
+		if ( name.charAt( 0 ) == '$' ) {
+			name = name.slice( 1 );
+		}
+		if ( !name ) {
+			return 0;
+		}
+		names.push( name );
+	}
+	if ( !names.length ) {
+		return 0;
+	}
+	var missing = names.filter( function( n ) { return !allowed( n ); } );
+	if ( missing.length ) {
+		// once per distinct stack, for maintaining the list
+		var key = names.join( ' < ' );
+		Module['asyncifyMissing'] = Module['asyncifyMissing'] || {};
+		if ( !Module['asyncifyMissing'][key] ) {
+			Module['asyncifyMissing'][key] = true;
+			console.debug( 'loading screen: not suspendable through ' + missing.join( ', ' ) + ' (stack: ' + key + ')' );
+		}
+		return 0;
+	}
+	return 1;
+} );
+
+EM_ASYNC_JS( void, WEB_JS_WaitForRefresh, ( void ), {
+	Module['loadingRefreshes'] = ( Module['loadingRefreshes'] || 0 ) + 1;
+	await new Promise( function( resolve ) {
+		requestAnimationFrame( function() { resolve(); } );
+	} );
+} );

@@ -599,6 +599,76 @@ void R_LevelShot( void ) {
 	ri.Printf( PRINT_ALL, "Wrote %s\n", checkname );
 }
 
+#ifdef __EMSCRIPTEN__
+#include "../../web/web_js.h"
+
+/*
+==================
+R_WebScreenshot
+
+WebGPU reads the frame back asynchronously (web/wgl_readback.c): the
+screenshot is written when the pixels arrive, a frame or two later, and then
+offered as a browser download since the home directory lives in IndexedDB.
+==================
+*/
+typedef enum { WEBSHOT_TGA, WEBSHOT_JPEG, WEBSHOT_LEVELSHOT } webShotType_t;
+
+typedef struct {
+	webShotType_t type;
+	int width, height;
+	char fileName[MAX_OSPATH];
+} webShot_t;
+
+static void R_WebScreenshotDone( void *arg, int ok ) {
+	webShot_t *shot = arg;
+	void *data;
+	int len;
+
+	// a vid_restart in between changes the size the writers assume
+	if ( ok && shot->width == glConfig.vidWidth && shot->height == glConfig.vidHeight ) {
+		qglPixelStorei( GL_PACK_ALIGNMENT, 1 );     // the writers assume tightly packed rows
+		switch ( shot->type ) {
+		case WEBSHOT_TGA:
+			R_TakeScreenshot( 0, 0, shot->width, shot->height, shot->fileName );
+			break;
+		case WEBSHOT_JPEG:
+			R_TakeScreenshotJPEG( 0, 0, shot->width, shot->height, shot->fileName );
+			break;
+		case WEBSHOT_LEVELSHOT:
+			if ( tr.world ) {
+				R_LevelShot();
+			}
+			break;
+		}
+		qglPixelStorei( GL_PACK_ALIGNMENT, 4 );
+
+		// cl_avidemo takes one every frame; those stay in the home directory
+		if ( shot->type != WEBSHOT_LEVELSHOT && !ri.Cvar_Get( "cl_avidemo", "0", 0 )->integer ) {
+			len = ri.FS_ReadFile( shot->fileName, &data );
+			if ( len > 0 ) {
+				WEB_OfferFile( shot->fileName, data, len );
+				ri.FS_FreeFile( data );
+			}
+		}
+	} else {
+		ri.Printf( PRINT_ALL, "Screenshot %s failed\n", shot->type == WEBSHOT_LEVELSHOT ? "levelshot" : shot->fileName );
+	}
+	free( shot );
+}
+
+static void R_WebScreenshot( webShotType_t type, const char *fileName ) {
+	webShot_t *shot = malloc( sizeof( *shot ) );
+
+	shot->type = type;
+	shot->width = glConfig.vidWidth;
+	shot->height = glConfig.vidHeight;
+	Q_strncpyz( shot->fileName, fileName ? fileName : "", sizeof( shot->fileName ) );
+	if ( !WGL_ReadPixelsAsync( 0, 0, shot->width, shot->height, R_WebScreenshotDone, shot ) ) {
+		free( shot );
+	}
+}
+#endif
+
 /*
 ==================
 R_ScreenShot_f
@@ -618,7 +688,11 @@ void R_ScreenShot_f( void ) {
 	qboolean silent;
 
 	if ( !strcmp( ri.Cmd_Argv( 1 ), "levelshot" ) ) {
+#ifdef __EMSCRIPTEN__
+		R_WebScreenshot( WEBSHOT_LEVELSHOT, NULL );
+#else
 		R_LevelShot();
+#endif
 		return;
 	}
 
@@ -659,7 +733,11 @@ void R_ScreenShot_f( void ) {
 	}
 
 
+#ifdef __EMSCRIPTEN__
+	R_WebScreenshot( WEBSHOT_TGA, checkname );
+#else
 	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname );
+#endif
 
 	if ( !silent ) {
 		ri.Printf( PRINT_ALL, "Wrote %s\n", checkname );
@@ -673,7 +751,11 @@ void R_ScreenShotJPEG_f( void ) {
 	qboolean silent;
 
 	if ( !strcmp( ri.Cmd_Argv( 1 ), "levelshot" ) ) {
+#ifdef __EMSCRIPTEN__
+		R_WebScreenshot( WEBSHOT_LEVELSHOT, NULL );
+#else
 		R_LevelShot();
+#endif
 		return;
 	}
 
@@ -714,7 +796,11 @@ void R_ScreenShotJPEG_f( void ) {
 	}
 
 
+#ifdef __EMSCRIPTEN__
+	R_WebScreenshot( WEBSHOT_JPEG, checkname );
+#else
 	R_TakeScreenshotJPEG( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname );
+#endif
 
 	if ( !silent ) {
 		ri.Printf( PRINT_ALL, "Wrote %s\n", checkname );
@@ -929,7 +1015,12 @@ void R_Register( void ) {
 
 	r_ati_fsaa_samples              = ri.Cvar_Get( "r_ati_fsaa_samples", "1", CVAR_ARCHIVE | CVAR_UNSAFE );        //DAJ valids are 1, 2, 4
 
+#ifdef __EMSCRIPTEN__
+	// WebGPU always offers 16x; sharper floors and walls at no real cost
+	r_ext_texture_filter_anisotropic    = ri.Cvar_Get( "r_ext_texture_filter_anisotropic", "1", CVAR_ARCHIVE | CVAR_LATCH | CVAR_UNSAFE );
+#else
 	r_ext_texture_filter_anisotropic    = ri.Cvar_Get( "r_ext_texture_filter_anisotropic", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_UNSAFE );
+#endif
 
 	r_ext_NV_fog_dist                   = ri.Cvar_Get( "r_ext_NV_fog_dist", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_UNSAFE );
 	r_nv_fogdist_mode                   = ri.Cvar_Get( "r_nv_fogdist_mode", "GL_EYE_RADIAL_NV", CVAR_ARCHIVE | CVAR_UNSAFE );  // default to 'looking good'
@@ -1014,7 +1105,11 @@ void R_Register( void ) {
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE );
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_NEAREST", CVAR_ARCHIVE );
+#ifdef __EMSCRIPTEN__
+	r_textureAnisotropy = ri.Cvar_Get( "r_textureAnisotropy", "8", CVAR_ARCHIVE );
+#else
 	r_textureAnisotropy = ri.Cvar_Get( "r_textureAnisotropy", "1.0", CVAR_ARCHIVE );
+#endif
 	r_swapInterval = ri.Cvar_Get( "r_swapInterval", "0", CVAR_ARCHIVE );
 #ifdef __MACOS__
 	r_gamma = ri.Cvar_Get( "r_gamma", "1.2", CVAR_ARCHIVE );

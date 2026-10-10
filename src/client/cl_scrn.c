@@ -521,6 +521,10 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+#include "../../web/web_js.h"
+#endif
+
 /*
 ==================
 SCR_UpdateScreen
@@ -559,4 +563,11 @@ void SCR_UpdateScreen( void ) {
 	}
 
 	recursive = 0;
+
+#ifdef __EMSCRIPTEN__
+	// any update but CL_Frame's is a loading screen: let the browser show it
+	if ( !web_frameUpdate ) {
+		WEB_LoadingUpdate();
+	}
+#endif
 }

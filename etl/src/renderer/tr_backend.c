@@ -1286,6 +1286,19 @@ const void *RB_DrawSurfs(const void *data)
 
 	RB_RenderDrawSurfList(cmd->drawSurfs, cmd->numDrawSurfs);
 
+#ifdef __EMSCRIPTEN__
+	// bloom, sharpening and color for views of the world (web/wgl_post.c)
+	if (!(backEnd.refdef.rdflags & (RDF_NOWORLDMODEL | RDF_SKYBOXPORTAL)) && !backEnd.viewParms.isPortal)
+	{
+		if (tess.numIndexes)
+		{
+			RB_EndSurface();
+		}
+		WGL_EndScene(backEnd.viewParms.viewportX, backEnd.viewParms.viewportY,
+		             backEnd.viewParms.viewportWidth, backEnd.viewParms.viewportHeight);
+	}
+#endif
+
 	return ( const void * ) (cmd + 1);
 }
 

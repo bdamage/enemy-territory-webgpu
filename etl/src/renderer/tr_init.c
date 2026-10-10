@@ -433,15 +433,92 @@ void RB_TakeScreenshotPNG(int x, int y, int width, int height, char *fileName)
 }
 #endif
 
-/**
- * @brief RB_TakeScreenshotCmd
- * @param[in] data
- * @return
- */
-const void *RB_TakeScreenshotCmd(const void *data)
-{
-	const screenshotCommand_t *cmd = ( const screenshotCommand_t * ) data;
+#ifdef __EMSCRIPTEN__
+#include "web_js.h"
 
+/**
+ * @brief WebGPU reads the frame back asynchronously (web/wgl_readback.c):
+ * the screenshot is written when the pixels arrive, a frame or two later,
+ * and then offered as a browser download since the home directory lives in
+ * IndexedDB.
+ */
+typedef struct
+{
+	screenshotCommand_t cmd;
+	qboolean levelshot;
+	int windowWidth, windowHeight;
+	char fileName[MAX_OSPATH];
+} webShot_t;
+
+static void RB_TakeScreenshotFormat(const screenshotCommand_t *cmd);
+void R_LevelShot(void);
+
+static void R_WebScreenshotDone(void *arg, int ok)
+{
+	webShot_t *shot = (webShot_t *)arg;
+	void      *data;
+	int       len;
+
+	// a vid_restart in between changes the size the writers assume
+	if (ok && shot->windowWidth == glConfig.windowWidth && shot->windowHeight == glConfig.windowHeight)
+	{
+		if (shot->levelshot)
+		{
+			if (tr.world)
+			{
+				R_LevelShot();
+			}
+		}
+		else
+		{
+			shot->cmd.fileName = shot->fileName;
+			RB_TakeScreenshotFormat(&shot->cmd);
+
+			// cl_avidemo takes one every frame; those stay in the home directory
+			if (!ri.Cvar_VariableIntegerValue("cl_avidemo"))
+			{
+				len = ri.FS_ReadFile(shot->fileName, &data);
+				if (len > 0)
+				{
+					WEB_OfferFile(shot->fileName, data, len);
+					ri.FS_FreeFile(data);
+				}
+			}
+		}
+	}
+	else
+	{
+		Ren_Print("Screenshot %s failed\n", shot->levelshot ? "levelshot" : shot->fileName);
+	}
+	free(shot);
+}
+
+static void R_WebScreenshot(const screenshotCommand_t *cmd, qboolean levelshot)
+{
+	webShot_t *shot = (webShot_t *)calloc(1, sizeof(*shot));
+
+	if (cmd)
+	{
+		shot->cmd = *cmd;
+		Q_strncpyz(shot->fileName, cmd->fileName, sizeof(shot->fileName));
+	}
+	shot->levelshot    = levelshot;
+	shot->windowWidth  = glConfig.windowWidth;
+	shot->windowHeight = glConfig.windowHeight;
+	// the writers read the whole window (R_FBOReadPixels)
+	if (!WGL_ReadPixelsAsync(0, 0, glConfig.windowWidth, glConfig.windowHeight, R_WebScreenshotDone, shot))
+	{
+		free(shot);
+	}
+}
+#endif
+
+/**
+ * @brief RB_TakeScreenshotFormat
+ * @param[in] cmd
+ */
+static void RB_TakeScreenshotFormat(const screenshotCommand_t *cmd)
+{
 	switch (cmd->format)
 	{
 	case SSF_TGA:
@@ -456,6 +533,22 @@ const void *RB_TakeScreenshotCmd(const void *data)
 		break;
 #endif
 	}
+}
+
+/**
+ * @brief RB_TakeScreenshotCmd
+ * @param[in] data
+ * @return
+ */
+const void *RB_TakeScreenshotCmd(const void *data)
+{
+	const screenshotCommand_t *cmd = ( const screenshotCommand_t * ) data;
+
+#ifdef __EMSCRIPTEN__
+	R_WebScreenshot(cmd, qfalse);
+#else
+	RB_TakeScreenshotFormat(cmd);
+#endif
 
 	return ( const void * ) (cmd + 1);
 }
@@ -718,7 +811,11 @@ void R_ScreenShot_f(void)
 
 	if (!strcmp(ri.Cmd_Argv(1), "levelshot"))
 	{
+#ifdef __EMSCRIPTEN__
+		R_WebScreenshot(NULL, qtrue);
+#else
 		R_LevelShot();
+#endif
 		return;
 	}
 

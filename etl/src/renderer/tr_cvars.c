@@ -177,8 +177,14 @@ void R_Register(void)
 	r_extMultitexture       = ri.Cvar_Get("r_ext_multitexture", "1", CVAR_ARCHIVE_ND | CVAR_LATCH | CVAR_UNSAFE);
 	r_extTextureEnvAdd      = ri.Cvar_Get("r_ext_texture_env_add", "1", CVAR_ARCHIVE_ND | CVAR_LATCH);
 
+#ifdef __EMSCRIPTEN__
+	// WebGPU always offers 16x; sharper floors and walls at no real cost
+	r_extTextureFilterAnisotropic = ri.Cvar_Get("r_ext_texture_filter_anisotropic", "1", CVAR_ARCHIVE_ND | CVAR_LATCH | CVAR_UNSAFE);
+	r_extMaxAnisotropy            = ri.Cvar_Get("r_ext_max_anisotropy", "8", CVAR_ARCHIVE_ND | CVAR_LATCH);
+#else
 	r_extTextureFilterAnisotropic = ri.Cvar_Get("r_ext_texture_filter_anisotropic", "0", CVAR_ARCHIVE_ND | CVAR_LATCH | CVAR_UNSAFE);
 	r_extMaxAnisotropy            = ri.Cvar_Get("r_ext_max_anisotropy", "2", CVAR_ARCHIVE_ND | CVAR_LATCH);
+#endif
 
 	r_picMip = ri.Cvar_Get("r_picmip", "1", CVAR_ARCHIVE | CVAR_LATCH);          // mod for DM and DK for id build.  was "1" - pushed back to 1
 	ri.Cvar_CheckRange(r_picMip, 0, 3, qtrue);

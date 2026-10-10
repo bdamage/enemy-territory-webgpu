@@ -33,7 +33,7 @@ WARN := -Wno-everything -Wimplicit-function-declaration \
 # id's master is long gone; ET: Legacy's master also lists 2.60b servers
 MASTER := -DMASTER_SERVER_NAME='"etmaster.etlegacy.com"'
 
-CFLAGS_BASE := $(OPT) $(WARN) $(MASTER) -fno-strict-aliasing -std=gnu99 -fcommon \
+CFLAGS_BASE := -MMD -MP $(OPT) $(WARN) $(MASTER) -fno-strict-aliasing -std=gnu99 -fcommon \
                -Wno-error=int-conversion -Wno-error=incompatible-pointer-types \
                -Wno-error=implicit-int -Wno-error=return-type
 CXXFLAGS_BASE := $(OPT) -Wno-everything -fno-strict-aliasing -std=gnu++98
@@ -67,7 +67,7 @@ BOTLIB := be_aas_bspq3 be_aas_cluster be_aas_debug be_aas_entity be_aas_file \
         be_interface l_crc l_libvar l_log l_memory l_precomp l_script l_struct
 SPLINES := math_angles math_matrix math_quaternion math_vector q_parse \
         splines util_str
-WEB := web_js sys_web web_input web_snd web_net web_dl web_modules glimp_vanilla wgl_core wgl_state wgl_draw \
+WEB := web_js web_frame web_module_data sys_web web_input web_snd web_net web_dl web_modules glimp_vanilla wgl_core wgl_state wgl_draw wgl_readback wgl_post \
         wgl_texture
 
 CORE_OBJS := \
@@ -123,10 +123,17 @@ CGAME_OBJS := $(call module_objs,cgame,$(CGAME_SRC))
 UI_RAW := $(call module_objs,ui_raw,$(UI_SRC))
 UI_OBJS := $(call module_objs,ui,$(UI_SRC))
 
-ALL_OBJS := $(CORE_OBJS) $(QAGAME_OBJS) $(CGAME_OBJS) $(UI_OBJS)
+# each module's objects between markers that bound its data (web/module_bounds.c)
+bounded = $(BUILD)/bounds/$(1)_begin.o $(2) $(BUILD)/bounds/$(1)_end.o
+ALL_OBJS := $(CORE_OBJS) $(call bounded,qagame,$(QAGAME_OBJS)) $(call bounded,cgame,$(CGAME_OBJS)) \
+	$(call bounded,ui,$(UI_OBJS))
 
 # ---------------------------------------------------------------------------
 # link
+
+# loading screens suspend the engine mid-load (web/web_frame.c)
+ASYNCIFY := -sASYNCIFY=1 -sASYNCIFY_ONLY=@web/asyncify.txt -sASYNCIFY_STACK_SIZE=65536 \
+	--pre-js $(BUILD)/asyncify.js
 
 LDFLAGS := $(OPT) $(LDOPT) $(WEBGPU_PORT) \
 	-sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=2GB \
@@ -134,7 +141,8 @@ LDFLAGS := $(OPT) $(LDOPT) $(WEBGPU_PORT) \
 	-sENVIRONMENT=web -sFORCE_FILESYSTEM=1 -lidbfs.js \
 	-sEXPORTED_RUNTIME_METHODS=FS,ccall,IDBFS,HEAPU8,HEAPF32,HEAP16 \
 	-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_WEB_ConsoleCommand \
-	--pre-js web/pre.js
+	--pre-js web/pre.js $(ASYNCIFY)
+
 
 all: classic legacy
 
@@ -143,7 +151,11 @@ classic: $(DIST)/et.js $(DIST)/index.html
 legacy:
 	@$(MAKE) -C etl DEBUG=$(DEBUG)
 
-$(DIST)/et.js: $(ALL_OBJS) web/pre.js
+$(BUILD)/asyncify.js: web/asyncify.txt tools/gen_asyncify_js.sh
+	@mkdir -p $(dir $@)
+	sh tools/gen_asyncify_js.sh $< > $@
+
+$(DIST)/et.js: $(ALL_OBJS) web/pre.js $(BUILD)/asyncify.js
 	@mkdir -p $(DIST)
 	@echo "  LINK $@"
 	@$(CXX) $(ALL_OBJS) $(LDFLAGS) -o $@
@@ -176,6 +188,13 @@ $(BUILD)/core/%.o: $(S)/%.c
 	@mkdir -p $(dir $@)
 	@echo "  CC  $<"
 	@$(CC) $(CFLAGS_BASE) $(CORE_INC) -c $< -o $@
+
+$(BUILD)/bounds/%_begin.o: web/module_bounds.c
+	@mkdir -p $(dir $@)
+	@$(CC) $(OPT) -fno-common -DMODULE=$* -DBOUND=begin -c $< -o $@
+$(BUILD)/bounds/%_end.o: web/module_bounds.c
+	@mkdir -p $(dir $@)
+	@$(CC) $(OPT) -fno-common -DMODULE=$* -DBOUND=end -c $< -o $@
 
 $(BUILD)/web/%.o: web/%.c web/*.h
 	@mkdir -p $(dir $@)
@@ -210,15 +229,15 @@ $(BUILD)/prefix/ui.h: $(UI_RAW) tools/gen_prefix.sh
 $(BUILD)/qagame/%.o: $(S)/%.c $(BUILD)/prefix/qagame.h
 	@mkdir -p $(dir $@)
 	@echo "  CC  $<"
-	@$(CC) $(CFLAGS_BASE) $(QAGAME_DEFS) -include $(BUILD)/prefix/qagame.h -c $< -o $@
+	@$(CC) $(CFLAGS_BASE) -fno-common $(QAGAME_DEFS) -include $(BUILD)/prefix/qagame.h -c $< -o $@
 $(BUILD)/cgame/%.o: $(S)/%.c $(BUILD)/prefix/cgame.h
 	@mkdir -p $(dir $@)
 	@echo "  CC  $<"
-	@$(CC) $(CFLAGS_BASE) $(CGAME_DEFS) -include $(BUILD)/prefix/cgame.h -c $< -o $@
+	@$(CC) $(CFLAGS_BASE) -fno-common $(CGAME_DEFS) -include $(BUILD)/prefix/cgame.h -c $< -o $@
 $(BUILD)/ui/%.o: $(S)/%.c $(BUILD)/prefix/ui.h
 	@mkdir -p $(dir $@)
 	@echo "  CC  $<"
-	@$(CC) $(CFLAGS_BASE) $(UI_DEFS) -include $(BUILD)/prefix/ui.h -c $< -o $@
+	@$(CC) $(CFLAGS_BASE) -fno-common $(UI_DEFS) -include $(BUILD)/prefix/ui.h -c $< -o $@
 
 # ---------------------------------------------------------------------------
 
@@ -229,3 +248,6 @@ clean:
 	rm -rf $(BUILD) $(DIST)
 
 .PHONY: all classic legacy serve clean
+
+# header dependencies (-MMD)
+-include $(ALL_OBJS:.o=.d)

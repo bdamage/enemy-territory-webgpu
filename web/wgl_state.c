@@ -39,6 +39,7 @@ void WGL_InitState( int width, int height ) {
 		gls.texEnv[i] = GL_MODULATE;
 	}
 	gls.color[0] = gls.color[1] = gls.color[2] = gls.color[3] = 1.0f;
+	gls.packAlignment = 4;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +379,8 @@ void wgGetIntegerv( GLenum pname, GLint *params ) {
 	case GL_DEPTH_BITS: params[0] = 24; break;
 	case GL_STENCIL_BITS: params[0] = 8; break;
 	case GL_RED_BITS: case GL_GREEN_BITS: case GL_BLUE_BITS: case GL_ALPHA_BITS: params[0] = 8; break;
+	case GL_PACK_ALIGNMENT: params[0] = gls.packAlignment; break;
+	case GL_UNPACK_ALIGNMENT: params[0] = 4; break;
 	default: params[0] = 0; break;
 	}
 }
@@ -425,4 +428,8 @@ void wgListBase( GLuint base ) { }
 void wgCallList( GLuint list ) { }
 void wgCallLists( GLsizei n, GLenum type, const GLvoid *lists ) { }
 void wgRasterPos3fv( const GLfloat *v ) { }
-void wgPixelStorei( GLenum pname, GLint param ) { }
+void wgPixelStorei( GLenum pname, GLint param ) {
+	if ( pname == GL_PACK_ALIGNMENT && ( param == 1 || param == 2 || param == 4 || param == 8 ) ) {
+		gls.packAlignment = param;
+	}
+}

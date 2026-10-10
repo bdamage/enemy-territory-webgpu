@@ -5,8 +5,8 @@
  *   /et/etmain/pak*.pk3   game data   (fs_basepath = /et)
  *   /home/et           persistent  (fs_homepath, IndexedDB-backed)
  *
- * The engine runs one Com_Frame per requestAnimationFrame. Input and audio
- * live in web_input.c / web_snd.c.
+ * Game frames run at com_maxfps on requestAnimationFrame (web_frame.c).
+ * Input and audio live in web_input.c / web_snd.c.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -25,9 +25,7 @@
 #define WEB_BASEPATH    "/et"
 #define WEB_HOMEPATH    "/home/et"
 
-static double sys_startTime;
 static char sys_cmdline[MAX_STRING_CHARS];
-static int sys_lastFrameTime;
 static qboolean sys_quitting;
 
 // console commands typed into the page's debug prompt
@@ -39,10 +37,7 @@ static int consoleHead, consoleTail;
 // time
 
 int Sys_Milliseconds( void ) {
-	if ( sys_startTime == 0.0 ) {
-		sys_startTime = emscripten_get_now();
-	}
-	return (int)( emscripten_get_now() - sys_startTime );
+	return (int)( WEB_Microseconds() / 1000 );
 }
 
 // ---------------------------------------------------------------------------
@@ -525,20 +520,11 @@ extern cvar_t *com_maxfps;
 
 static void Sys_Frame( void ) {
 	static int lastSync;
-	int now = Sys_Milliseconds();
+	int now;
 
-	// Com_Frame would busy-wait to honour com_maxfps; skip the frame instead
-	// and let the browser call us again on the next animation frame
-	if ( com_maxfps && com_maxfps->integer > 0 ) {
-		int minMsec = 1000 / com_maxfps->integer;
-		if ( now - sys_lastFrameTime < minMsec - 1 ) {
-			return;
-		}
-	}
-	sys_lastFrameTime = now;
+	WEB_RunFrames( com_maxfps ? com_maxfps->integer : 0, Com_Frame );
 
-	Com_Frame();
-
+	now = Sys_Milliseconds();
 	if ( now - lastSync > 5000 ) {
 		lastSync = now;
 		Sys_SyncFS();
@@ -547,6 +533,10 @@ static void Sys_Frame( void ) {
 
 int main( int argc, char **argv ) {
 	int i;
+
+	WEB_MODULE_DATA( qagame );
+	WEB_MODULE_DATA( cgame );
+	WEB_MODULE_DATA( ui );
 
 	sys_cmdline[0] = 0;
 	for ( i = 1; i < argc; i++ ) {

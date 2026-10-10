@@ -7,10 +7,12 @@
  * passes with cached pipelines, a streamed vertex/index/uniform ring and a
  * final gamma-correcting blit to the canvas.
  *
- *   wgl_device.c   device, surface, render targets, frame submit, GLimp_*
+ *   wgl_core.c     device, surface, render targets, frame submit
  *   wgl_state.c    enables, blend/depth/stencil, matrices, fog, queries
  *   wgl_texture.c  texture objects, uploads, samplers
  *   wgl_draw.c     client arrays, immediate mode, pipelines, draw/clear
+ *   wgl_readback.c asynchronous glReadPixels (screenshots)
+ *   wgl_post.c     bloom, sharpening and color for the 3D view (WGL_EndScene)
  */
 #ifndef WGL_LOCAL_H
 #define WGL_LOCAL_H
@@ -62,7 +64,7 @@ typedef struct {
 	float fogColor[4];
 	float fogParams[4];     // start, end, density, mode (0 off, 1 linear, 2 exp, 3 exp2)
 	float params[4];        // alphaRef, alphaFunc (0 off, 1 >, 2 <, 3 >=), env0, env1
-	float flags[4];         // clip enabled, radial fog, -, -
+	float flags[4];         // clip enabled, radial fog, alpha to coverage, -
 } wglUniforms_t;
 
 #define WGL_UNIFORM_STRIDE  256
@@ -138,6 +140,8 @@ typedef struct {
 
 	float clipPlane[4];             // eye space
 
+	int packAlignment;              // GL_PACK_ALIGNMENT (glReadPixels row padding)
+
 	// matrices (column-major)
 	GLenum matrixMode;
 	float modelview[WGL_MATRIX_DEPTH][16];
@@ -156,7 +160,7 @@ typedef struct {
 extern wglState_t gls;
 
 // ---------------------------------------------------------------------------
-// device (wgl_device.c)
+// device (wgl_core.c)
 
 typedef struct {
 	WGPUInstance instance;
@@ -166,9 +170,13 @@ typedef struct {
 	WGPUTextureFormat surfaceFormat;
 
 	int width, height;              // render target size
+	int canvasWidth, canvasHeight;  // presented size (differs with r_renderScale)
+	int samples;                    // MSAA sample count of the scene target (1 or 4)
 
-	WGPUTexture colorTex;           // offscreen scene target (GL "back buffer")
+	WGPUTexture colorTex;           // offscreen scene target (GL "back buffer"), resolved
 	WGPUTextureView colorView;
+	WGPUTexture msaaTex;            // multisampled color drawn into when samples > 1
+	WGPUTextureView msaaView;
 	WGPUTexture depthTex;
 	WGPUTextureView depthView;
 
@@ -208,6 +216,16 @@ wglTexture_t *WGL_GetTexture( GLuint name );
 WGPUBindGroup WGL_TextureBindGroup( wglTexture_t *t );
 WGPUBindGroupLayout WGL_TextureBindGroupLayout( void );
 wglTexture_t *WGL_WhiteTexture( void );
+
+// post-processing (wgl_post.c)
+void    WGL_InitPost( void );
+void    WGL_ShutdownPost( void );
+void    WGL_PostFrame( void );      // end of frame: reset per-frame state
+
+// readback (wgl_readback.c)
+void    WGL_ReadbackSubmitted( void );
+void    WGL_ReadbackFrame( void );
+void    WGL_ShutdownReadback( void );
 
 // matrix helpers (wgl_state.c)
 void    WGL_MatMul( float out[16], const float a[16], const float b[16] );

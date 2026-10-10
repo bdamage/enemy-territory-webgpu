@@ -937,6 +937,9 @@ qboolean FS_FilenameCompare(const char *s1, const char *s2);
 qboolean FS_IsDemoExt(const char *fileName, int namelen);
 
 const char *FS_LoadedPakNames(void);
+#ifdef __EMSCRIPTEN__
+const char *FS_PakContaining(const char *fileName);
+#endif
 const char *FS_LoadedPakChecksums(void);
 const char *FS_LoadedPakPureChecksums(void);
 // Returns a space separated string containing the checksums of all loaded pk3 files.

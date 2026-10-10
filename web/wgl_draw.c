@@ -79,7 +79,12 @@ static const char *shaderSource =
 "  if (u.params.z > 0.5) { c = texenv(u.params.z, c, a); }\n"
 "  if (u.params.w > 0.5) { c = texenv(u.params.w, c, b); }\n"
 "  let af = u.params.y;\n"
-"  if (af > 0.5) {\n"
+"  let fw = fwidth(c.a);\n"
+"  if (u.flags.z > 0.5) {\n"
+// alpha to coverage instead of the alpha test (MSAA): coverage from an
+// alpha sharpened to about a pixel's width around the reference
+"    c.a = clamp((c.a - u.params.x) / max(fw, 0.0001) + 0.5, 0.0, 1.0);\n"
+"  } else if (af > 0.5) {\n"
 "    if (af < 1.5) { if (!(c.a > u.params.x)) { discard; } }\n"
 "    else if (af < 2.5) { if (!(c.a < u.params.x)) { discard; } }\n"
 "    else { if (!(c.a >= u.params.x)) { discard; } }\n"
@@ -108,7 +113,8 @@ typedef struct {
 	uint8_t cullMode, colorMask;
 	uint8_t stencilCompare, stencilFail, stencilZFail, stencilPass;
 	uint8_t stencilRead, stencilWrite;
-	uint8_t pad[2];
+	uint8_t alphaToCoverage;
+	uint8_t pad;
 	int32_t biasUnits;
 	float biasSlope;
 } pipeKey_t;
@@ -298,8 +304,9 @@ static WGPURenderPipeline CreatePipeline( const pipeKey_t *k ) {
 	ds.depthBiasClamp = 0.0f;
 	d.depthStencil = &ds;
 
-	d.multisample.count = 1;
+	d.multisample.count = wgl.samples;
 	d.multisample.mask = 0xFFFFFFFF;
+	d.multisample.alphaToCoverageEnabled = k->alphaToCoverage ? 1 : 0;
 
 	bs.color.operation = WGPUBlendOperation_Add;
 	bs.color.srcFactor = (WGPUBlendFactor)k->srcFactor;
@@ -387,6 +394,13 @@ static void StateKey( pipeKey_t *k, WGPUPrimitiveTopology topology ) {
 		k->stencilWrite = 0;
 	}
 
+	// with MSAA, opaque alpha-tested surfaces (foliage, fences, grates) use
+	// alpha to coverage so their edges are anti-aliased too
+	if ( wgl.samples > 1 && gls.alphaTest && !gls.blend && topology == WGPUPrimitiveTopology_TriangleList
+		 && ( gls.alphaFunc == GL_GREATER || gls.alphaFunc == GL_GEQUAL ) ) {
+		k->alphaToCoverage = 1;
+	}
+
 	if ( topology == WGPUPrimitiveTopology_TriangleList && gls.polyOffsetFill ) {
 		k->biasUnits = (int32_t)gls.polyUnits;
 		k->biasSlope = gls.polyFactor;
@@ -444,7 +458,14 @@ static void OpenPass( void ) {
 	WGPURenderPassColorAttachment ca = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
 	WGPURenderPassDepthStencilAttachment da = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
 
-	ca.view = wgl.colorView;
+	if ( wgl.samples > 1 ) {
+		// resolve at the end of every pass so colorTex is always current for
+		// copies, readbacks and post-processing
+		ca.view = wgl.msaaView;
+		ca.resolveTarget = wgl.colorView;
+	} else {
+		ca.view = wgl.colorView;
+	}
 	ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
 	ca.loadOp = pending.color ? WGPULoadOp_Clear : WGPULoadOp_Load;
 	ca.storeOp = WGPUStoreOp_Store;
@@ -596,6 +617,7 @@ static int CaptureState( drawState_t *s, WGPUPrimitiveTopology topology ) {
 
 	StateKey( &s->key, topology );
 	StateUniforms( &s->uniforms );
+	s->uniforms.flags[2] = s->key.alphaToCoverage ? 1.0f : 0.0f;
 
 	t0 = gls.texture2D[0] ? WGL_GetTexture( gls.bound[0] ) : NULL;
 	t1 = gls.texture2D[1] ? WGL_GetTexture( gls.bound[1] ) : NULL;
@@ -1046,19 +1068,6 @@ void wgClear( GLbitfield mask ) {
 		numVerts += 4;
 		Draw( &s, first, 6 );
 	}
-}
-
-// Synchronous readback isn't possible in WebGPU; screenshots and the
-// r_measureOverdraw stencil readback get zeroes.
-void wgReadPixels( GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels ) {
-	static int warned;
-	int bpp = ( format == GL_RGBA ) ? 4 : ( format == GL_RGB ) ? 3 : ( format == GL_DEPTH_COMPONENT ) ? 4 : 1;
-
-	if ( !warned ) {
-		WGL_Printf( "wgl: glReadPixels is not supported by the WebGPU backend\n" );
-		warned = 1;
-	}
-	memset( pixels, 0, (size_t)width * height * bpp );
 }
 
 // ---------------------------------------------------------------------------

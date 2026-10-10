@@ -29,6 +29,11 @@ If you have questions concerning this license or the applicable additional terms
 // cl_main.c  -- client main loop
 
 #include "client.h"
+
+#ifdef __EMSCRIPTEN__
+#include "../../web/web_js.h"
+#endif
+
 #include <limits.h>
 
 #include "snd_local.h" // fretn
@@ -2722,7 +2727,16 @@ void CL_Frame( int msec ) {
 	CL_SetCGameTime();
 
 	// update the screen
+#ifdef __EMSCRIPTEN__
+	// game frames between two display refreshes don't draw (web/web_frame.c)
+	if ( !web_skipRender ) {
+		web_frameUpdate = 1;
+		SCR_UpdateScreen();
+		web_frameUpdate = 0;
+	}
+#else
 	SCR_UpdateScreen();
+#endif
 
 	// update the sound
 	S_Update();

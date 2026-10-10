@@ -3732,6 +3732,32 @@ void FS_TouchFile_f(void)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/**
+ * @brief Finds the pk3 a file would be read from.
+ *
+ * The browser build has several versions of the legacy mod's client code
+ * compiled in and picks one by the mod pak that supplies the cgame binary,
+ * as the native client extracts it from (see etl/web/etl_sys.c).
+ *
+ * @param[in] fileName
+ * @return The pak's base name (no extension), or NULL if no pak has the file
+ */
+const char *FS_PakContaining(const char *fileName)
+{
+	searchpath_t *search;
+
+	for (search = fs_searchpaths; search; search = search->next)
+	{
+		if (search->pack && FS_FOpenFileReadDir(fileName, search, NULL, qfalse, qfalse) > 0)
+		{
+			return search->pack->pakBasename;
+		}
+	}
+	return NULL;
+}
+#endif
+
 /**
  * @brief FS_Which
  * @param[in] fileName

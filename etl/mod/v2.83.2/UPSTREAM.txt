@@ -1,0 +1,13 @@
+ET: Legacy v2.83.2 (https://github.com/etlegacy/etlegacy/releases/tag/v2.83.2)
+Imported: the client-side mod code only -- src/cgame, src/ui, src/game/bg_*.c
+and src/game/*.h, the src/qcommon headers plus q_math.c, q_shared.c and
+q_unicode.c and json/, src/renderercommon/*.h, etmain/ui/menudef.h, COPYING.txt and
+VERSION.txt. web/git_version.h stands in for the CMake-generated header.
+
+The web build compiles this cgame and ui next to v2.86.1's so the browser can
+join servers still running the v2.83 legacy mod, whose network protocol the
+newer client code doesn't speak (see etl/web/etl_sys.c, Sys_LoadGameDll).
+
+Local changes: the __EMSCRIPTEN__ platform block in
+src/qcommon/q_platform.h and CPUSTRING in src/qcommon/q_shared.h, and the
+trap_FS_Write prototype in src/ui/ui_local.h for cgame builds (as in etl/src).

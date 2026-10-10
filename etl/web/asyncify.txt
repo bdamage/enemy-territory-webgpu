@@ -1,0 +1,65 @@
+# Functions Asyncify instruments so a map load can be suspended to show its
+# loading screen (see web/web_frame.c). Every wasm function on the stack at a
+# loading screen update must be listed; WEB_JS_CanSuspend skips the update
+# (and logs the missing function to the browser console) otherwise. A
+# trailing * matches a prefix (static functions with clashing names get
+# build-specific suffixes).
+WEB_LoadingUpdate
+SCR_UpdateScreen
+Com_Frame
+RunFrame
+WEB_RunFrames
+Sys_Frame
+CL_CgameSystemCalls
+VM_DllSyscall
+cgame__trap_UpdateScreen
+cgame__CG_DrawInformation
+cgame__trap_S_RegisterSound
+cgame__CG_SoundScriptPrecache
+cgame__CG_SoundInit
+CgameEntry
+VM_CallFunc
+CL_InitCGame
+CL_DownloadsComplete
+Com_DownloadsComplete
+Com_InitDownloads
+CL_ParseServerMessage
+CL_PacketEvent
+Com_EventLoop
+dynCall_j
+dynCall_v
+Cmd_ExecuteString
+Cbuf_ExecuteText
+RE_LoadWorldMap
+cgame__trap_R_RegisterModel
+CG_RW_ParseWeaponSound*
+CG_RW_ParseSoundSurface*
+CG_RW_ParseViewType*
+cgame__CG_RegisterCharacter
+SV_SpawnServer
+SV_Map_f
+Cbuf_Execute
+cgame__trap_R_RegisterSkin
+CL_Vid_Restart_f
+cgame__trap_R_RegisterShaderNoMip
+cgame__SP_misc_gamemodel
+cgame__CG_ParseEntitiesFromString
+cgame__trap_R_RegisterShader
+# the same call paths in the v2.83.2 client code
+cgame283__trap_UpdateScreen
+cgame283__CG_DrawInformation
+cgame283__trap_S_RegisterSound
+cgame283__CG_SoundScriptPrecache
+cgame283__CG_SoundInit
+Cgame283Entry
+cgame283__trap_R_RegisterModel
+cgame283__CG_RegisterCharacter
+cgame283__trap_R_RegisterSkin
+cgame283__trap_R_RegisterShaderNoMip
+cgame283__SP_misc_gamemodel
+cgame283__CG_ParseEntitiesFromString
+cgame283__trap_R_RegisterShader
+cgame__CG_ParseVoiceChats
+cgame283__CG_ParseVoiceChats
+NET_Sleep
+dynCall_vj

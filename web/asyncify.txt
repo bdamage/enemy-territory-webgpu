@@ -1,0 +1,40 @@
+# Functions Asyncify instruments so a map load can be suspended to show its
+# loading screen (see web/web_frame.c). Every wasm function on the stack at a
+# loading screen update must be listed; WEB_JS_CanSuspend skips the update
+# (and logs the missing function to the browser console) otherwise. A
+# trailing * matches a prefix (static functions with clashing names get
+# build-specific suffixes).
+WEB_LoadingUpdate
+SCR_UpdateScreen
+Com_Frame
+RunFrame
+WEB_RunFrames
+Sys_Frame
+Cmd_ExecuteString
+Cbuf_ExecuteText
+RE_LoadWorldMap
+CL_CgameSystemCalls
+VM_DllSyscall
+CgameEntry
+VM_Call
+CL_InitCGame
+CL_DownloadsComplete
+CL_ParseServerMessage
+CL_PacketEvent
+Com_EventLoop
+dynCall_i
+dynCall_v
+cgame__trap_UpdateScreen
+cgame__CG_DrawInformation
+cgame__trap_R_RegisterModel
+SV_SpawnServer
+SV_Map_f
+Cbuf_Execute
+cgame__CG_RegisterWeapon
+CL_Vid_Restart_f
+CG_RW_ParseViewType*
+cgame__trap_R_RegisterShader
+cgame__trap_R_RegisterSkin
+cgame__trap_S_RegisterSound
+NET_Sleep
+cgame__trap_R_RegisterShaderNoMip

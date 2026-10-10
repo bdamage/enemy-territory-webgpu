@@ -17,6 +17,6 @@ for m in re.finditer(pat, src):
     seen.add(name)
     out.append(f"#define qgl{name} wg{name}")
     out.append(f"{ret} wg{name}( {args} );")
-out += ["", "#endif", ""]
+out += ["", '#include "wgl_engine.h"', "", "#endif", ""]
 open(os.path.join(root, 'web/qgl_wgpu.h'), 'w').write("\n".join(out))
 print(f"{len(seen)} entry points", file=sys.stderr)

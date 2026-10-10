@@ -119,10 +119,14 @@ static WGPUSampler GetSampler( GLenum minF, GLenum magF, GLenum wrapS, GLenum wr
 	mipmapped = ( minF != GL_NEAREST && minF != GL_LINEAR );
 	mipLinear = ( minF == GL_NEAREST_MIPMAP_LINEAR || minF == GL_LINEAR_MIPMAP_LINEAR );
 	aniso = (int)anisotropy;
-	// WebGPU only allows anisotropy with all-linear filtering
+	// WebGPU only allows anisotropy with all-linear filtering: mipmapped
+	// bilinear textures (2.60b's default GL_LINEAR_MIPMAP_NEAREST) become
+	// trilinear rather than losing it
 	if ( aniso < 1 || FilterMode( minF ) != WGPUFilterMode_Linear || FilterMode( magF ) != WGPUFilterMode_Linear
-		 || !mipLinear ) {
+		 || !mipmapped ) {
 		aniso = 1;
+	} else if ( aniso > 1 ) {
+		mipLinear = 1;
 	}
 	if ( aniso > 16 ) {
 		aniso = 16;

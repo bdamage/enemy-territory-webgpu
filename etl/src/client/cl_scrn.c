@@ -561,6 +561,10 @@ void SCR_DrawScreenField(void)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+#include "web_js.h"
+#endif
+
 /**
  * @brief This is called every frame, and can also be called explicitly to flush
  * text to the screen.
@@ -595,4 +599,12 @@ void SCR_UpdateScreen(void)
 	}
 
 	recursive = 0;
+
+#ifdef __EMSCRIPTEN__
+	// any update but CL_Frame's is a loading screen: let the browser show it
+	if (!web_frameUpdate)
+	{
+		WEB_LoadingUpdate();
+	}
+#endif
 }

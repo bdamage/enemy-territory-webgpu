@@ -2318,6 +2318,27 @@ void S_FreeOldestSound(void)
 		}
 	}
 
+	// lastTimeUsed is in milliseconds but s_soundtime counts samples, which
+	// stand still while no audio is playing (a browser tab before its first
+	// click, or hidden). Then nothing qualifies and SND_malloc would spin
+	// forever; take the least recently used sound instead.
+	if (!used)
+	{
+		for (i = 1 ; i < numSfx ; i++)
+		{
+			sfx = &knownSfx[i];
+			if (sfx->inMemory && (!used || sfx->lastTimeUsed < oldest))
+			{
+				used   = i;
+				oldest = sfx->lastTimeUsed;
+			}
+		}
+		if (!used)
+		{
+			Com_Error(ERR_FATAL, "S_FreeOldestSound: out of sound memory (com_soundMegs)");
+		}
+	}
+
 	sfx = &knownSfx[used];
 
 	Com_DPrintf("S_FreeOldestSound: freeing sound %s\n", sfx->soundName);

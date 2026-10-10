@@ -5,7 +5,8 @@
  * WGL_Present and WGL_SetGammaRamp.
  *
  * The scene is rendered into an offscreen RGBA8 target (the GL "back
- * buffer"). WGL_Present blits it to the canvas through a 256-entry gamma
+ * buffer"), multisampled with r_msaa and sized by r_renderScale relative to
+ * the canvas. WGL_Present blits it to the canvas through a 256-entry gamma
  * ramp, which stands in for the hardware gamma ramp the original renderers
  * rely on for r_gamma and overbright lighting.
  */
@@ -17,29 +18,38 @@
 #include "wgl_local.h"
 
 wglDevice_t wgl;
+wglOptions_t wglOptions = { 4, 1.0f, 0.0f, 0.0f, 0.0f };
 void ( *WGL_PrintHook )( const char *msg );
 
 void WGL_InitState( int width, int height );
 
 static WGPURenderPipeline blitPipeline;
 static WGPUBindGroup blitBindGroup;
+static WGPUSampler blitSampler;
 static WGPUTexture gammaTex;
 static WGPUTextureView gammaView;
 static int deviceLost;
 
+// Draws the scene to the canvas, filtered when r_renderScale makes their
+// sizes differ, through the gamma ramp.
 static const char *blitShader =
 "@group(0) @binding(0) var scene : texture_2d<f32>;\n"
 "@group(0) @binding(1) var ramp : texture_2d<f32>;\n"
-"@vertex fn vs(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {\n"
+"@group(0) @binding(2) var smp : sampler;\n"
+"struct V { @builtin(position) pos : vec4f, @location(0) uv : vec2f };\n"
+"@vertex fn vs(@builtin(vertex_index) i : u32) -> V {\n"
 "  let uv = vec2f(f32((i << 1u) & 2u), f32(i & 2u));\n"
-"  return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);\n"
+"  return V(vec4f(uv * 2.0 - 1.0, 0.0, 1.0), vec2f(uv.x, 1.0 - uv.y));\n"
 "}\n"
-"@fragment fn fs(@builtin(position) p : vec4f) -> @location(0) vec4f {\n"
-"  let c = textureLoad(scene, vec2i(p.xy), 0);\n"
+"fn gamma(c : vec3f) -> vec3f {\n"
 "  let r = textureLoad(ramp, vec2i(i32(round(c.r * 255.0)), 0), 0).r;\n"
 "  let g = textureLoad(ramp, vec2i(i32(round(c.g * 255.0)), 0), 0).g;\n"
 "  let b = textureLoad(ramp, vec2i(i32(round(c.b * 255.0)), 0), 0).b;\n"
-"  return vec4f(r, g, b, 1.0);\n"
+"  return vec3f(r, g, b);\n"
+"}\n"
+"@fragment fn fs(v : V) -> @location(0) vec4f {\n"
+"  let c = textureSampleLevel(scene, smp, v.uv, 0.0).rgb;\n"
+"  return vec4f(gamma(clamp(c, vec3f(0.0), vec3f(1.0))), 1.0);\n"
 "}\n";
 
 // ---------------------------------------------------------------------------
@@ -111,6 +121,7 @@ void WGL_SubmitEncoder( void ) {
 	wgpuCommandBufferRelease( cb );
 	wgpuCommandEncoderRelease( wgl.encoder );
 	wgl.encoder = NULL;
+	WGL_ReadbackSubmitted();
 }
 
 void WGL_Flush( void ) {
@@ -123,7 +134,7 @@ void WGL_Flush( void ) {
 // ---------------------------------------------------------------------------
 // render targets
 
-static WGPUTexture CreateTarget( WGPUTextureFormat format, WGPUTextureUsage usage, const char *label ) {
+static WGPUTexture CreateTarget( WGPUTextureFormat format, WGPUTextureUsage usage, int samples, const char *label ) {
 	WGPUTextureDescriptor d = WGPU_TEXTURE_DESCRIPTOR_INIT;
 
 	d.label.data = label;
@@ -135,7 +146,7 @@ static WGPUTexture CreateTarget( WGPUTextureFormat format, WGPUTextureUsage usag
 	d.size.depthOrArrayLayers = 1;
 	d.format = format;
 	d.mipLevelCount = 1;
-	d.sampleCount = 1;
+	d.sampleCount = samples;
 	return wgpuDeviceCreateTexture( wgl.device, &d );
 }
 
@@ -145,27 +156,36 @@ static void CreateTargets( void ) {
 	cfg.device = wgl.device;
 	cfg.format = wgl.surfaceFormat;
 	cfg.usage = WGPUTextureUsage_RenderAttachment;
-	cfg.width = wgl.width;
-	cfg.height = wgl.height;
+	cfg.width = wgl.canvasWidth;
+	cfg.height = wgl.canvasHeight;
 	cfg.alphaMode = WGPUCompositeAlphaMode_Opaque;
 	cfg.presentMode = WGPUPresentMode_Fifo;
 	wgpuSurfaceConfigure( wgl.surface, &cfg );
 
 	wgl.colorTex = CreateTarget( WGPUTextureFormat_RGBA8Unorm,
 								 WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding
-								 | WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst, "scene color" );
+								 | WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst, 1, "scene color" );
 	wgl.colorView = wgpuTextureCreateView( wgl.colorTex, NULL );
-	wgl.depthTex = CreateTarget( WGPUTextureFormat_Depth24PlusStencil8, WGPUTextureUsage_RenderAttachment, "scene depth" );
+	if ( wgl.samples > 1 ) {
+		// drawn into, and resolved into colorTex whenever a pass ends
+		wgl.msaaTex = CreateTarget( WGPUTextureFormat_RGBA8Unorm, WGPUTextureUsage_RenderAttachment, wgl.samples,
+									"scene color (multisampled)" );
+		wgl.msaaView = wgpuTextureCreateView( wgl.msaaTex, NULL );
+	}
+	wgl.depthTex = CreateTarget( WGPUTextureFormat_Depth24PlusStencil8, WGPUTextureUsage_RenderAttachment, wgl.samples,
+								 "scene depth" );
 	wgl.depthView = wgpuTextureCreateView( wgl.depthTex, NULL );
 }
 
 static void DestroyTargets( void ) {
 	if ( wgl.colorView ) wgpuTextureViewRelease( wgl.colorView );
 	if ( wgl.colorTex ) { wgpuTextureDestroy( wgl.colorTex ); wgpuTextureRelease( wgl.colorTex ); }
+	if ( wgl.msaaView ) wgpuTextureViewRelease( wgl.msaaView );
+	if ( wgl.msaaTex ) { wgpuTextureDestroy( wgl.msaaTex ); wgpuTextureRelease( wgl.msaaTex ); }
 	if ( wgl.depthView ) wgpuTextureViewRelease( wgl.depthView );
 	if ( wgl.depthTex ) { wgpuTextureDestroy( wgl.depthTex ); wgpuTextureRelease( wgl.depthTex ); }
-	wgl.colorView = wgl.depthView = NULL;
-	wgl.colorTex = wgl.depthTex = NULL;
+	wgl.colorView = wgl.msaaView = wgl.depthView = NULL;
+	wgl.colorTex = wgl.msaaTex = wgl.depthTex = NULL;
 	if ( wgl.surface ) {
 		wgpuSurfaceUnconfigure( wgl.surface );
 	}
@@ -196,8 +216,9 @@ static void CreateBlit( void ) {
 	WGPUColorTargetState ct = WGPU_COLOR_TARGET_STATE_INIT;
 	WGPUFragmentState fs = WGPU_FRAGMENT_STATE_INIT;
 	WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
-	WGPUBindGroupEntry e[2] = { WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT };
+	WGPUBindGroupEntry e[3] = { WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT };
 	WGPUBindGroupDescriptor bd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+	WGPUSamplerDescriptor sd = WGPU_SAMPLER_DESCRIPTOR_INIT;
 	WGPUBindGroupLayout layout;
 	WGPUShaderModule module;
 	unsigned char identity[256];
@@ -244,8 +265,13 @@ static void CreateBlit( void ) {
 	e[0].textureView = wgl.colorView;
 	e[1].binding = 1;
 	e[1].textureView = gammaView;
+	sd.magFilter = WGPUFilterMode_Linear;
+	sd.minFilter = WGPUFilterMode_Linear;
+	blitSampler = wgpuDeviceCreateSampler( wgl.device, &sd );
+	e[2].binding = 2;
+	e[2].sampler = blitSampler;
 	bd.layout = layout;
-	bd.entryCount = 2;
+	bd.entryCount = 3;
 	bd.entries = e;
 	blitBindGroup = wgpuDeviceCreateBindGroup( wgl.device, &bd );
 	wgpuBindGroupLayoutRelease( layout );
@@ -254,10 +280,12 @@ static void CreateBlit( void ) {
 static void DestroyBlit( void ) {
 	if ( blitBindGroup ) wgpuBindGroupRelease( blitBindGroup );
 	if ( blitPipeline ) wgpuRenderPipelineRelease( blitPipeline );
+	if ( blitSampler ) wgpuSamplerRelease( blitSampler );
 	if ( gammaView ) wgpuTextureViewRelease( gammaView );
 	if ( gammaTex ) wgpuTextureRelease( gammaTex );
 	blitBindGroup = NULL;
 	blitPipeline = NULL;
+	blitSampler = NULL;
 	gammaView = NULL;
 	gammaTex = NULL;
 }
@@ -270,6 +298,7 @@ static void DestroyBlit( void ) {
 void WGL_DeviceInit( int *width, int *height ) {
 	WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvasSrc = WGPU_EMSCRIPTEN_SURFACE_SOURCE_CANVAS_HTML_SELECTOR_INIT;
 	WGPUSurfaceDescriptor sd = WGPU_SURFACE_DESCRIPTOR_INIT;
+	float scale;
 
 	if ( !wgl.device ) {
 		wgl.instance = wgpuCreateInstance( NULL );
@@ -282,16 +311,27 @@ void WGL_DeviceInit( int *width, int *height ) {
 		wgl.surfaceFormat = WGL_JS_PreferredFormatIsBGRA() ? WGPUTextureFormat_BGRA8Unorm : WGPUTextureFormat_RGBA8Unorm;
 	}
 
-	WGL_JS_SizeCanvas( &wgl.width, &wgl.height );
+	WGL_JS_SizeCanvas( &wgl.canvasWidth, &wgl.canvasHeight );
+	scale = wglOptions.renderScale;
+	if ( !( scale >= 0.25f ) ) scale = 0.25f;     // also catches NaN
+	if ( scale > 2.0f ) scale = 2.0f;
+	wgl.width = (int)( wgl.canvasWidth * scale + 0.5f );
+	wgl.height = (int)( wgl.canvasHeight * scale + 0.5f );
+	if ( wgl.width > 8192 ) wgl.width = 8192;
+	if ( wgl.height > 8192 ) wgl.height = 8192;
+	wgl.samples = wglOptions.msaa > 1 ? 4 : 1;     // WebGPU offers 1 or 4
+
 	CreateTargets();
 	WGL_InitTextures();
 	WGL_InitDraw();
+	WGL_InitPost();
 	CreateBlit();
 	WGL_InitState( wgl.width, wgl.height );
 
 	*width = wgl.width;
 	*height = wgl.height;
-	WGL_Printf( "WebGPU: %dx%d, canvas format %s\n", wgl.width, wgl.height,
+	WGL_Printf( "WebGPU: %dx%d (canvas %dx%d), %dx MSAA, canvas format %s\n", wgl.width, wgl.height,
+				wgl.canvasWidth, wgl.canvasHeight, wgl.samples,
 				wgl.surfaceFormat == WGPUTextureFormat_BGRA8Unorm ? "bgra8unorm" : "rgba8unorm" );
 }
 
@@ -302,7 +342,9 @@ void WGL_DeviceShutdown( void ) {
 	WGL_EndPass();
 	WGL_SubmitEncoder();
 	WGL_ResetStreams();
+	WGL_ShutdownReadback();
 	DestroyBlit();
+	WGL_ShutdownPost();
 	WGL_ShutdownDraw();
 	WGL_ShutdownTextures();
 	DestroyTargets();
@@ -322,6 +364,7 @@ void WGL_Present( void ) {
 		return;
 	}
 
+	WGL_ReadbackFrame();
 	WGL_ApplyPendingClears();
 	WGL_EndPass();
 
@@ -350,6 +393,7 @@ void WGL_Present( void ) {
 	WGL_UploadStreams();
 	WGL_SubmitEncoder();
 	WGL_ResetStreams();
+	WGL_PostFrame();
 }
 
 void WGL_SetGammaRamp( const unsigned char *red, const unsigned char *green, const unsigned char *blue ) {

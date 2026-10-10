@@ -9,8 +9,17 @@
 #include "../src/sys/sys_local.h"
 #include "wgl_local.h"
 
+static cvar_t *r_msaa, *r_renderScale, *r_bloom, *r_sharpen, *r_vibrance;
+
 static void PrintHook( const char *msg ) {
 	Com_Printf( "%s", msg );
+}
+
+// per-frame options (wgl_engine.h); r_msaa and r_renderScale apply at vid_restart
+static void UpdateOptions( void ) {
+	wglOptions.bloom = r_bloom->value;
+	wglOptions.sharpen = r_sharpen->value;
+	wglOptions.vibrance = r_vibrance->value;
 }
 
 void GLimp_Init( glconfig_t *glConfig, const char *glConfigString ) {
@@ -19,6 +28,19 @@ void GLimp_Init( glconfig_t *glConfig, const char *glConfigString ) {
 	Com_Printf( "Initializing WebGPU renderer\n" );
 	Cvar_Get( "r_mode", "-2", CVAR_ARCHIVE | CVAR_LATCH | CVAR_UNSAFE );
 	Cvar_Get( "r_fullscreen", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_UNSAFE );
+	r_msaa = Cvar_Get( "r_msaa", "4", CVAR_ARCHIVE | CVAR_LATCH );
+	Cvar_SetDescription( r_msaa, "Multisample anti-aliasing: 0 off, 4 samples (WebGPU)" );
+	r_renderScale = Cvar_Get( "r_renderScale", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	Cvar_SetDescription( r_renderScale, "Render resolution relative to the window, 0.25 - 2 (WebGPU)" );
+	r_bloom = Cvar_Get( "r_bloom", "0.5", CVAR_ARCHIVE );
+	Cvar_SetDescription( r_bloom, "Bloom strength, 0 off (WebGPU)" );
+	r_sharpen = Cvar_Get( "r_sharpen", "0.3", CVAR_ARCHIVE );
+	Cvar_SetDescription( r_sharpen, "Contrast adaptive sharpening, 0 off - 1 (WebGPU)" );
+	r_vibrance = Cvar_Get( "r_vibrance", "0", CVAR_ARCHIVE );
+	Cvar_SetDescription( r_vibrance, "Saturation boost for dull colors, 0 off (WebGPU)" );
+	wglOptions.msaa = r_msaa->integer;
+	wglOptions.renderScale = r_renderScale->value;
+	UpdateOptions();
 
 	WGL_PrintHook = PrintHook;
 	WGL_DeviceInit( &width, &height );
@@ -51,6 +73,7 @@ void GLimp_Shutdown( void ) {
 
 void GLimp_EndFrame( void ) {
 	WGL_Present();
+	UpdateOptions();
 }
 
 void GLimp_SetGamma( unsigned char red[256], unsigned char green[256], unsigned char blue[256] ) {

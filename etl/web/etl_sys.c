@@ -3,7 +3,8 @@
  *
  * sys_unix.c (POSIX file/time helpers) is used as-is; this file provides the
  * rest: paths, console input from the page, printing/errors, the statically
- * linked game modules and a main loop driven by requestAnimationFrame.
+ * linked game modules and a main loop driven by requestAnimationFrame
+ * (fixed-rate game frames, see ../../web/web_frame.c).
  *
  * Filesystem (populated by web/pre.js before main):
  *   /et/etmain/pak0-2.pk3, /et/legacy/legacy_v2.86.1.pk3   fs_basepath = /et
@@ -46,6 +47,11 @@ char *Sys_DefaultInstallPath( void ) {
 qboolean Sys_WritePIDFile( void ) {
 	// tabs never exit cleanly, so a crash marker would trigger every visit
 	return qtrue;
+}
+
+// replaces sys_unix.c's: the engine clock is paced by web_frame.c
+int64_t Sys_Microseconds( void ) {
+	return WEB_Microseconds();
 }
 
 int Sys_FileTime( char *path ) {
@@ -162,10 +168,14 @@ typedef intptr_t ( QDECL *syscall_t )( intptr_t, ... );
 	intptr_t a6, intptr_t a7, intptr_t a8, intptr_t a9, intptr_t a10, intptr_t a11
 intptr_t cgame__vmMain( VMMAIN_12 );
 intptr_t ui__vmMain( VMMAIN_12 );
+intptr_t cgame283__vmMain( VMMAIN_12 );
+intptr_t ui283__vmMain( VMMAIN_12 );
 intptr_t qagame__vmMain( intptr_t command, intptr_t a0, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4,
 						 intptr_t a5, intptr_t a6 );
 void cgame__dllEntry( syscall_t syscallptr );
 void ui__dllEntry( syscall_t syscallptr );
+void cgame283__dllEntry( syscall_t syscallptr );
+void ui283__dllEntry( syscall_t syscallptr );
 void qagame__dllEntry( syscall_t syscallptr );
 
 // VM_EntryPoint_t takes 16 arguments; the modules' vmMain take fewer, and
@@ -182,26 +192,62 @@ static intptr_t QDECL UiEntry( ENTRY_ARGS ) {
 	return ui__vmMain( cmd, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11 );
 }
 
+static intptr_t QDECL Cgame283Entry( ENTRY_ARGS ) {
+	return cgame283__vmMain( cmd, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11 );
+}
+
+static intptr_t QDECL Ui283Entry( ENTRY_ARGS ) {
+	return ui283__vmMain( cmd, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11 );
+}
+
 static intptr_t QDECL QagameEntry( ENTRY_ARGS ) {
 	return qagame__vmMain( cmd, a0, a1, a2, a3, a4, a5, a6 );
 }
 
 typedef struct {
 	const char *name;
+	const char *build;          // its symbol prefix (see ../Makefile, MODULES)
+	int maxMinor;               // newest legacy mod v2.x it's used for
 	VM_EntryPoint_t entry;
 	void ( *dllEntry )( syscall_t );
 } staticModule_t;
 
+// Newest first. v2.84 changed the network protocol, so servers still on an
+// older legacy mod get that release's client code, as native clients do by
+// loading it from the server's mod pak.
 static staticModule_t modules[] = {
-	{ "cgame", CgameEntry, cgame__dllEntry },
-	{ "ui", UiEntry, ui__dllEntry },
-	{ "qagame", QagameEntry, qagame__dllEntry },
+	{ "cgame", "cgame", 99, CgameEntry, cgame__dllEntry },
+	{ "cgame", "cgame283", 83, Cgame283Entry, cgame283__dllEntry },
+	{ "ui", "ui", 99, UiEntry, ui__dllEntry },
+	{ "ui", "ui283", 83, Ui283Entry, ui283__dllEntry },
+	{ "qagame", "qagame", 99, QagameEntry, qagame__dllEntry },
 };
+
+static void WEB_RegisterModuleData( void ) {
+	WEB_MODULE_DATA( cgame );
+	WEB_MODULE_DATA( cgame283 );
+	WEB_MODULE_DATA( ui );
+	WEB_MODULE_DATA( ui283 );
+	WEB_MODULE_DATA( qagame );
+}
+
+// The legacy mod release whose pak supplies the module's native binary
+// (legacy_v2.83.2.pk3 -> 83), or 99 if it isn't a legacy pak.
+static int ModPakMinor( const char *name ) {
+	const char *pak = FS_PakContaining( va( Sys_GetDLLName( "%s" ), name ) );
+	int major, minor;
+
+	if ( pak && !Q_stricmpn( pak, "legacy_v", 8 ) && sscanf( pak + 8, "%d.%d", &major, &minor ) == 2 && major == 2 ) {
+		return minor;
+	}
+	return 99;
+}
 
 void *Sys_LoadGameDll( const char *name, qboolean extract, VM_EntryPoint_t *entryPoint,
 					   intptr_t ( *systemcalls )( intptr_t, ... ) ) {
 	const char *gamedir = Cvar_VariableString( "fs_game" );
-	int i;
+	staticModule_t *m = NULL;
+	int i, minor;
 
 	if ( gamedir[0] && Q_stricmp( gamedir, DEFAULT_MODGAME ) && !Q_stricmp( name, "cgame" ) ) {
 		// Only the legacy mod's code is compiled in. (The ui falls back to
@@ -216,26 +262,33 @@ void *Sys_LoadGameDll( const char *name, qboolean extract, VM_EntryPoint_t *entr
 		Com_Error( ERR_DROP, "This server runs the mod \"%s\", which needs its own client code.\n"
 				   "The browser version of ET: Legacy can only join servers running the legacy mod.", mod );
 	}
+
+	minor = Q_stricmp( name, "qagame" ) ? ModPakMinor( name ) : 99;
 	for ( i = 0; i < (int)ARRAY_LEN( modules ); i++ ) {
-		if ( !Q_stricmp( name, modules[i].name ) ) {
-			Com_Printf( "Sys_LoadGameDll(%s): statically linked module\n", name );
-			if ( Q_stricmp( name, "qagame" ) ) {
-				// read the mod pk3's native cgame/ui binary once so the pak
-				// counts as referenced for pure server checks (see
-				// Sys_GetDLLName in qcommon.h)
-				fileHandle_t f;
-				FS_FOpenFileRead( va( Sys_GetDLLName( "%s" ), name ), &f, qfalse );
-				if ( f ) {
-					FS_FCloseFile( f );
-				}
-			}
-			modules[i].dllEntry( systemcalls );
-			*entryPoint = modules[i].entry;
-			return &modules[i];
+		if ( !Q_stricmp( name, modules[i].name ) && minor <= modules[i].maxMinor ) {
+			m = &modules[i];    // the oldest release that still covers this pak
 		}
 	}
-	Com_Printf( "Sys_LoadGameDll(%s): no such module\n", name );
-	return NULL;
+	if ( !m ) {
+		Com_Printf( "Sys_LoadGameDll(%s): no such module\n", name );
+		return NULL;
+	}
+
+	Com_Printf( "Sys_LoadGameDll(%s): statically linked module (%s)\n", name, m->build );
+	if ( Q_stricmp( name, "qagame" ) ) {
+		// read the mod pk3's native cgame/ui binary once so the pak counts
+		// as referenced for pure server checks (see Sys_GetDLLName in
+		// qcommon.h)
+		fileHandle_t f;
+		FS_FOpenFileRead( va( Sys_GetDLLName( "%s" ), name ), &f, qfalse );
+		if ( f ) {
+			FS_FCloseFile( f );
+		}
+	}
+	WEB_ModuleDataReset( m->build );    // a fresh copy, as a dlopen would give
+	m->dllEntry( systemcalls );
+	*entryPoint = m->entry;
+	return m;
 }
 
 void *Sys_LoadDll( const char *name, qboolean useSystemLib ) {
@@ -250,19 +303,12 @@ void Sys_UnloadDll( void *dllHandle ) {
 // main loop
 
 static void Sys_Frame( void ) {
-	static int lastSync, lastFrame;
-	int now = Sys_Milliseconds();
-	int maxfps = Cvar_VariableIntegerValue( "com_maxfps" );
+	static int lastSync;
+	int now;
 
-	// honour com_maxfps on high refresh rate displays by skipping frames
-	// (Com_Frame no longer waits; see qcommon/common.c)
-	if ( maxfps > 0 && now - lastFrame < 1000 / maxfps - 1 ) {
-		return;
-	}
-	lastFrame = now;
+	WEB_RunFrames( Cvar_VariableIntegerValue( "com_maxfps" ), Com_Frame );
 
-	Com_Frame();
-
+	now = Sys_Milliseconds();
 	if ( now - lastSync > 5000 ) {
 		lastSync = now;
 		WEB_SyncFS();
@@ -272,6 +318,8 @@ static void Sys_Frame( void ) {
 int main( int argc, char **argv ) {
 	char commandLine[MAX_STRING_CHARS] = { 0 };
 	int i;
+
+	WEB_RegisterModuleData();
 
 	for ( i = 1; i < argc; i++ ) {
 		qboolean containsSpaces = strchr( argv[i], ' ' ) != NULL;

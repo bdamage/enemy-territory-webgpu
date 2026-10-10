@@ -7,14 +7,31 @@
 
 int gl_NormalFontBase = 0;     // display-list font for r_debugSurface text (unsupported)
 
+static cvar_t *r_msaa, *r_renderScale, *r_bloom, *r_sharpen, *r_vibrance;
+
 static void PrintHook( const char *msg ) {
 	ri.Printf( PRINT_ALL, "%s", msg );
+}
+
+// per-frame options (wgl_engine.h); r_msaa and r_renderScale apply at vid_restart
+static void UpdateOptions( void ) {
+	wglOptions.bloom = r_bloom->value;
+	wglOptions.sharpen = r_sharpen->value;
+	wglOptions.vibrance = r_vibrance->value;
 }
 
 void GLimp_Init( void ) {
 	int width, height;
 
 	ri.Printf( PRINT_ALL, "Initializing WebGPU renderer\n" );
+	r_msaa = ri.Cvar_Get( "r_msaa", "4", CVAR_ARCHIVE | CVAR_LATCH );
+	r_renderScale = ri.Cvar_Get( "r_renderScale", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	r_bloom = ri.Cvar_Get( "r_bloom", "0.5", CVAR_ARCHIVE );
+	r_sharpen = ri.Cvar_Get( "r_sharpen", "0.3", CVAR_ARCHIVE );
+	r_vibrance = ri.Cvar_Get( "r_vibrance", "0", CVAR_ARCHIVE );
+	wglOptions.msaa = r_msaa->integer;
+	wglOptions.renderScale = r_renderScale->value;
+	UpdateOptions();
 	WGL_PrintHook = PrintHook;
 	WGL_DeviceInit( &width, &height );
 
@@ -50,6 +67,7 @@ void GLimp_Shutdown( void ) {
 
 void GLimp_EndFrame( void ) {
 	WGL_Present();
+	UpdateOptions();
 }
 
 void GLimp_SetGamma( unsigned char red[256], unsigned char green[256], unsigned char blue[256] ) {

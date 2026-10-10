@@ -233,6 +233,7 @@ int Sys_Milliseconds(void)
 	return (int)(Sys_Microseconds() / 1000LL);
 }
 
+#ifndef __EMSCRIPTEN__ // web: etl/web/etl_sys.c
 /**
  * @brief Sys_Microseconds
  * @return current system time in microseconds since server/client was started
@@ -258,6 +259,7 @@ int64_t Sys_Microseconds(void)
 
 	return currentTime_us - timeBase_us;
 }
+#endif
 
 /**
  * @param[in,out] v Vector

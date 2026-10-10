@@ -690,4 +690,6 @@ void wgVertexPointer( GLint size, GLenum type, GLsizei stride, const GLvoid *poi
 #define qglViewport wgViewport
 void wgViewport( GLint x, GLint y, GLsizei width, GLsizei height );
 
+#include "wgl_engine.h"
+
 #endif
